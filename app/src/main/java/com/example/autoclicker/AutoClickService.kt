@@ -22,8 +22,8 @@ class AutoClickService : AccessibilityService() {
     
     
     private fun parseNumericValue(text: String, suffixes: String): Double? {
-        val noSpaces = text.replace(Regex("\s+"), "").lowercase()
-        val match = Regex("(-?\d+[.,\d]*)([a-zа-я]*)").find(noSpaces)
+        val noSpaces = text.replace(Regex("\\s+"), "").lowercase()
+        val match = Regex("(-?\\d+[.,\\d]*)([a-zа-я]*)").find(noSpaces)
         if (match == null) return null
         
         var numPart = match.groupValues[1]
@@ -841,8 +841,8 @@ class AutoClickService : AccessibilityService() {
                         }
                     } else {
                         val ocrMatch = fuzzyContains(recStrOcr, searchStr, maxCost) ||
-                                      fuzzyContains(recognizedText.lowercase().replace(Regex("\s+"), ""),
-                                                   searchStrOrig.lowercase().replace(Regex("\s+"), ""),
+                                      fuzzyContains(recognizedText.lowercase().replace(Regex("\\s+"), ""),
+                                                   searchStrOrig.lowercase().replace(Regex("\\s+"), ""),
                                                    maxCost)
                         isMatch = ocrMatch
                         debugMsg = "Шаг ${node.id}: [OCR] '$recognizedText'. Ищем: '${node.targetText}'. Совпадение: $isMatch"
@@ -943,8 +943,8 @@ class AutoClickService : AccessibilityService() {
                         }
                     } else {
                         val ocrMatch = fuzzyContains(recStrOcr, searchStr, maxCost) ||
-                                      fuzzyContains(recognizedText.lowercase().replace(Regex("\s+"), ""),
-                                                   searchStrOrig.lowercase().replace(Regex("\s+"), ""),
+                                      fuzzyContains(recognizedText.lowercase().replace(Regex("\\s+"), ""),
+                                                   searchStrOrig.lowercase().replace(Regex("\\s+"), ""),
                                                    maxCost)
                         isMatch = ocrMatch
                         debugMsg = "Шаг ${node.id}: [OCR] '$recognizedText'. Ищем: '${node.targetText}'. Совпадение: $isMatch"
@@ -1613,5 +1613,13 @@ class AutoClickService : AccessibilityService() {
             e.printStackTrace()
             android.widget.Toast.makeText(this, "Ошибка загрузки", android.widget.Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun performGlobalClick(x: Float, y: Float, duration: Long) {
+        val path = android.graphics.Path().apply { moveTo(x, y) }
+        val stroke = android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, duration)
+        val gesture = android.accessibilityservice.GestureDescription.Builder().addStroke(stroke).build()
+        gestureQueue.offer(gesture)
+        processGestureQueue()
     }
 }
