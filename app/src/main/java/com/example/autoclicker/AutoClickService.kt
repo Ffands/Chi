@@ -961,7 +961,7 @@ class AutoClickService : AccessibilityService() {
                     if (isMatch && node.ocrFullScreenClick && foundRect != null) {
                         val clickX = left + foundRect.centerX()
                         val clickY = top + foundRect.centerY()
-                        performGlobalClick(clickX, clickY, node.clickDurationMs)
+                        performGlobalClick(clickX.toFloat(), clickY.toFloat(), node.clickDurationMs)
                     }
                     
                     val finalResult = if (node.colorOperator == "!=") !isMatch else isMatch
