@@ -1,7 +1,12 @@
-with open('./app/src/main/java/com/example/autoclicker/UIManager.kt', 'r') as f:
-    text = f.read()
+import sys
 
-open_braces = text.count('{')
-close_braces = text.count('}')
+def count_braces(filepath):
+    with open(filepath, 'r') as f:
+        content = f.read()
+    open_b = content.count('{')
+    close_b = content.count('}')
+    print(f"{filepath}: {{ = {open_b}, }} = {close_b}")
 
-print(f"Open: {open_braces}, Close: {close_braces}")
+count_braces('./app/src/main/java/com/example/autoclicker/AutoClickService.kt')
+count_braces('./app/src/main/java/com/example/autoclicker/UIManager.kt')
+count_braces('./app/src/main/java/com/example/autoclicker/Models.kt')

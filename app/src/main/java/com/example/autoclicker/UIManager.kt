@@ -304,6 +304,7 @@ class UIManager(private val service: AutoClickService) {
                 text = if (service.isPlaying) "⏸" else "▶"
                 setTextColor(if (service.isPlaying) Color.parseColor("#FFD50000") else Color.parseColor("#FF00C853"))
             }
+
         }
         
         val recordBtn = Button(service).apply {
@@ -345,7 +346,7 @@ class UIManager(private val service: AutoClickService) {
             setBackgroundColor(Color.TRANSPARENT)
             layoutParams = LinearLayout.LayoutParams(dpToPx(40), dpToPx(40))
             setPadding(0, 0, 0, 0)
-            visibility = if (showSettingsBtn) View.VISIBLE else View.GONE
+            visibility = View.VISIBLE
             setOnClickListener { showModMenu() }
         }
         
@@ -414,10 +415,11 @@ class UIManager(private val service: AutoClickService) {
                 toggleVisBtn.visibility = if (isMinimized || !showEyeBtn) View.GONE else View.VISIBLE
                 linesToggleBtn.visibility = if (isMinimized || !showLinesBtn) View.GONE else View.VISIBLE
                 hotbarToggleBtn.visibility = if (isMinimized || !showHotbarBtn) View.GONE else View.VISIBLE
-                gearBtn.visibility = if (isMinimized || !showSettingsBtn) View.GONE else View.VISIBLE
+                gearBtn.visibility = if (isMinimized) View.GONE else View.VISIBLE
                 exitBtn.visibility = vis
                 if (isMinimized) hotbarRow.visibility = View.GONE
             }
+
         }
 
         topRow.addView(dragHandle)
@@ -1151,16 +1153,9 @@ class UIManager(private val service: AutoClickService) {
             isChecked = showHotbarBtn
             setOnCheckedChangeListener { _, c -> showHotbarBtn = c; saveUISettings(); recreateFloatingControlBar() }
         }
-        val pGear = android.widget.CheckBox(service).apply {
-            text = "Кнопка 'Настройки' (⚙)"
-            setTextColor(Color.WHITE)
-            isChecked = showSettingsBtn
-            setOnCheckedChangeListener { _, c -> showSettingsBtn = c; saveUISettings(); recreateFloatingControlBar() }
-        }
         layout.addView(pEye)
         layout.addView(pLines)
         layout.addView(pHotbar)
-        layout.addView(pGear)
 
         val debugBtn = Button(service).apply {
             text = if (isDebugWindowVisible) "Дебаг Лог: ВКЛ" else "Дебаг Лог: ВЫКЛ"
@@ -2136,14 +2131,18 @@ class UIManager(private val service: AutoClickService) {
         searchRadiusLayout.addView(searchRadiusEdit)
 
         val resolutionScaleLayout = LinearLayout(service).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, 5, 0, 5) }
-        resolutionScaleLayout.addView(TextView(service).apply { text = "Качество (0.1 - 1.0):"; setTextColor(Color.WHITE); layoutParams = LinearLayout.LayoutParams(0, WindowManager.LayoutParams.WRAP_CONTENT, 1f) })
-        val resolutionScaleEdit = EditText(service).apply {
-            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-            setText(node.checkResolutionScale.toString())
+        val resolutionScaleText = TextView(service).apply { 
+            text = "Качество (${(node.checkResolutionScale * 100).toInt()}%):"
             setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(dpToPx(130), WindowManager.LayoutParams.WRAP_CONTENT)
+            layoutParams = LinearLayout.LayoutParams(dpToPx(130), WindowManager.LayoutParams.WRAP_CONTENT) 
         }
-        resolutionScaleLayout.addView(resolutionScaleEdit)
+        val resolutionScaleBar = android.widget.SeekBar(service).apply {
+            max = 90
+            progress = ((node.checkResolutionScale - 0.1f) * 100).toInt()
+            layoutParams = LinearLayout.LayoutParams(0, WindowManager.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        resolutionScaleLayout.addView(resolutionScaleText)
+        resolutionScaleLayout.addView(resolutionScaleBar)
 
         val imgPreview = android.widget.ImageView(service).apply {
             layoutParams = LinearLayout.LayoutParams(WindowManager.LayoutParams.MATCH_PARENT, dpToPx(150)).apply { 
@@ -2152,19 +2151,45 @@ class UIManager(private val service: AutoClickService) {
             }
             scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
             adjustViewBounds = true
+        }
+
+        val updatePreviewImage = {
             if (node.targetImageBase64 != null) {
                 try {
                     val bytes = android.util.Base64.decode(node.targetImageBase64, android.util.Base64.DEFAULT)
                     var bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    
+                    val currentScale = (resolutionScaleBar.progress + 10) / 100f
                     if (node.triggerMode == 2) {
                         bitmap = service.enhanceBitmapForOcr(bitmap)
+                    } else if (node.triggerMode == 1 && currentScale < 1.0f) {
+                        val checkStep = (1f / currentScale).toInt().coerceAtLeast(1)
+                        if (checkStep > 1) {
+                            val sw = maxOf(1, bitmap.width / checkStep)
+                            val sh = maxOf(1, bitmap.height / checkStep)
+                            bitmap = android.graphics.Bitmap.createScaledBitmap(bitmap, sw, sh, false)
+                        }
                     }
-                    setImageBitmap(bitmap)
+                    imgPreview.setImageBitmap(bitmap)
+                    imgPreview.setBackgroundColor(Color.TRANSPARENT)
                 } catch(e: Exception) {}
             } else {
-                setBackgroundColor(Color.parseColor("#555555"))
+                imgPreview.setBackgroundColor(Color.parseColor("#555555"))
             }
         }
+        
+        resolutionScaleBar.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                val scale = (progress + 10) / 100f
+                resolutionScaleText.text = "Качество (${(scale * 100).toInt()}%):"
+                updatePreviewImage()
+            }
+            override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {}
+        })
+        
+        updatePreviewImage()
+
         
         val capImgBtn = Button(service).apply {
             text = if (node.triggerMode == 1) "ЗАХВАТИТЬ ФРАГМЕНТ ИЗОБРАЖЕНИЯ\n(Удерживать для сброса)" else "ТЕСТ РАСПОЗНАВАНИЯ ТЕКСТА"
@@ -2193,10 +2218,7 @@ class UIManager(private val service: AutoClickService) {
                             try {
                                 val bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
                                 var bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                                if (node.triggerMode == 2) {
-                                    bitmap = service.enhanceBitmapForOcr(bitmap)
-                                }
-                                imgPreview.setImageBitmap(bitmap)
+                                updatePreviewImage()
                                 node.targetImageBase64 = base64
                                 node.cachedTargetBitmap = null
                                 if (node.triggerMode == 1) {
@@ -2258,7 +2280,6 @@ class UIManager(private val service: AutoClickService) {
                 body.addView(textTargetLayout)
                 body.addView(ocrFullscreenLayout)
                 body.addView(fragZoneBtn)
-                body.addView(resolutionScaleLayout)
                 body.addView(imgPreview)
                 body.addView(capImgBtn)
             }
@@ -2391,10 +2412,13 @@ class UIManager(private val service: AutoClickService) {
                 node.colorTolerance = colorTolEdit.text.toString().toIntOrNull() ?: 15
                 node.imageThreshold = imgThresholdEdit.text.toString().toFloatOrNull() ?: 80f
                 node.searchRadius = searchRadiusEdit.text.toString().toIntOrNull() ?: 0
-                node.checkResolutionScale = resolutionScaleEdit.text.toString().toFloatOrNull() ?: 1.0f
+                node.checkResolutionScale = (resolutionScaleBar.progress + 10) / 100f
                 node.targetText = textTargetEdit.text.toString().takeIf { it.isNotEmpty() }
                 node.targetLanguage = if (textLangSpinner.selectedItemPosition == 1) "eng" else if (textLangSpinner.selectedItemPosition == 2) "rus+eng" else "rus"
                 node.ocrFullScreenClick = ocrFullscreenCheck.isChecked
+                node.ocrOperator = arrayOf("==", "!=", ">", "<", ">=", "<=")[smartOcrOpSpinner.selectedItemPosition]
+                node.ocrTargetValue = smartOcrValEdit.text.toString().toDoubleOrNull() ?: 0.0
+                node.ocrCustomSuffixes = smartOcrSufEdit.text.toString()
                 node.syncWithNodeIds = syncEdit.text.toString().filter { it.isDigit() || it == ',' }
                 node.swipeDurationMs = getSwipeDurRowMs()
                 node.swipeTargetNodeId = swipeTargetEdit.text.toString().toIntOrNull()
@@ -3135,6 +3159,40 @@ class UIManager(private val service: AutoClickService) {
                     debugScrollView?.fullScroll(View.FOCUS_DOWN)
                 }
             }
+        }
+    }
+
+    fun showOcrResultDialog(ocrText: String, searchedText: String, isMatch: Boolean, image: android.graphics.Bitmap) {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            val dialogView = android.widget.LinearLayout(service).apply {
+                orientation = android.widget.LinearLayout.VERTICAL
+                setPadding(dpToPx(20), dpToPx(20), dpToPx(20), dpToPx(20))
+                
+                addView(android.widget.TextView(service).apply {
+                    text = "Huawei OCR: '$ocrText'\n\nИскали: '$searchedText'\nИтог: $isMatch\n\nЧто видит OCR:"
+                    setTextColor(android.graphics.Color.WHITE)
+                    textSize = 14f
+                })
+                
+                val iv = android.widget.ImageView(service).apply {
+                    setImageBitmap(image)
+                    layoutParams = android.widget.LinearLayout.LayoutParams(
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                        dpToPx(200)
+                    ).apply { setMargins(0, dpToPx(10), 0, 0) }
+                    scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+                }
+                addView(iv)
+            }
+            
+            val dialog = android.app.AlertDialog.Builder(service, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Результат OCR (Huawei)")
+                .setView(dialogView)
+                .setPositiveButton("OK", null)
+                .create()
+                
+            dialog.window?.setType(android.view.WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY)
+            dialog.show()
         }
     }
 }

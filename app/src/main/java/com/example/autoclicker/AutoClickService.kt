@@ -22,37 +22,47 @@ class AutoClickService : AccessibilityService() {
     
     
     private fun parseNumericValue(text: String, suffixes: String): Double? {
-        val cleanText = text.replace(Regex("[^0-9.,a-zA-Zа-яА-Я]"), "").replace(",", ".").lowercase()
-        if (cleanText.isEmpty()) return null
+        val noSpaces = text.replace(Regex("\s+"), "").lowercase()
+        val match = Regex("(-?\d+[.,\d]*)([a-zа-я]*)").find(noSpaces)
+        if (match == null) return null
+        
+        var numPart = match.groupValues[1]
+        val sufPart = match.groupValues[2]
+        
+        if (numPart.contains(",") && numPart.contains(".")) {
+            numPart = numPart.replace(",", "")
+        } else if (numPart.count { it == ',' } == 1 && !numPart.contains(".")) {
+            numPart = numPart.replace(",", ".")
+        } else {
+            numPart = numPart.replace(",", "")
+        }
+        
+        val dotCount = numPart.count { it == '.' }
+        if (dotCount > 1) {
+            numPart = numPart.replace(".", "")
+        }
+        
+        val value = numPart.toDoubleOrNull() ?: return null
         
         var multiplier = 1.0
-        var numStr = cleanText
-        
-        val suffixMap = mutableMapOf<String, Double>()
-        if (suffixes.isNotEmpty()) {
+        if (sufPart.isNotEmpty() && suffixes.isNotEmpty()) {
             val pairs = suffixes.split(",")
+            val suffixMap = mutableMapOf<String, Double>()
             for (p in pairs) {
                 val kv = p.split(":")
                 if (kv.size == 2) {
                     suffixMap[kv[0].trim().lowercase()] = kv[1].trim().toDoubleOrNull() ?: 1.0
                 }
             }
-        }
-        
-        for ((suf, mult) in suffixMap) {
-            if (cleanText.endsWith(suf)) {
-                multiplier = mult
-                numStr = cleanText.substring(0, cleanText.length - suf.length)
-                break
-            } else if (cleanText.startsWith(suf)) {
-                multiplier = mult
-                numStr = cleanText.substring(suf.length)
-                break
+            for ((suf, mult) in suffixMap) {
+                if (sufPart.startsWith(suf)) {
+                    multiplier = mult
+                    break
+                }
             }
         }
         
-        val value = numStr.toDoubleOrNull()
-        return if (value != null) value * multiplier else null
+        return value * multiplier
     }
 
     fun normalizeCyrillic(str: String): String {
@@ -223,27 +233,7 @@ class AutoClickService : AccessibilityService() {
         
         val sw = (w * scale).toInt()
         val sh = (h * scale).toInt()
-        val scaled = Bitmap.createScaledBitmap(src, sw, sh, true)
-        
-        val pixels = IntArray(sw * sh)
-        scaled.getPixels(pixels, 0, sw, 0, 0, sw, sh)
-        
-        for (i in pixels.indices) {
-            val color = pixels[i]
-            val r = (color shr 16) and 0xFF
-            val g = (color shr 8) and 0xFF
-            val b = color and 0xFF
-            
-            val lum = (r * 77 + g * 150 + b * 29) shr 8
-            var newLum = ((lum - 128) * 3) + 128
-            if (newLum > 255) newLum = 255
-            else if (newLum < 0) newLum = 0
-            
-            pixels[i] = (0xFF shl 24) or (newLum shl 16) or (newLum shl 8) or newLum
-        }
-        
-        scaled.setPixels(pixels, 0, sw, 0, 0, sw, sh)
-        return scaled
+        return Bitmap.createScaledBitmap(src, sw, sh, true)
     }
 
     private fun getHuaweiAnalyzer(): com.huawei.hms.mlsdk.text.MLTextAnalyzer {
@@ -808,7 +798,7 @@ class AutoClickService : AccessibilityService() {
             val w = cropped.width
             val h = cropped.height
             val isRegionSelected = true
-                    
+            
             Thread {
                 var debugBmp: Bitmap? = null
                 try {
@@ -823,59 +813,49 @@ class AutoClickService : AccessibilityService() {
                         val task = analyzer.asyncAnalyseFrame(frame)
                         val result = com.huawei.hmf.tasks.Tasks.await(task)
                         recognizedText = result?.stringValue ?: ""
-                        if (enhanced != cropped) enhanced.recycle()
+                        if (enhanced != cropped && debugBmp == null) enhanced.recycle()
                     }
                     
                     val searchStr = normalizeCyrillic(searchStrOrig).replace(" ", "")
                     val recStrOcr = normalizeCyrillic(recognizedText).replace(" ", "")
-                    
                     val maxCost = if (searchStr.length <= 3) 0 else if (searchStr.length <= 6) 1 else searchStr.length / 4
-                    
-                    val ocrMatch = fuzzyContains(recStrOcr, searchStr, maxCost) || 
-                                  fuzzyContains(recognizedText.lowercase().replace(Regex("\\s+"), ""), 
-                                               searchStrOrig.lowercase().replace(Regex("\\s+"), ""), 
-                                               maxCost)
-                                               
-                    val isMatch = ocrMatch
-                    
-                    val resultText = "Huawei OCR: '$recognizedText'\nИскали: '$searchStr'\nИтог: $isMatch"
-                    
-                    val layout = android.widget.LinearLayout(this@AutoClickService).apply {
-                        orientation = android.widget.LinearLayout.VERTICAL
-                        setPadding(40, 20, 40, 20)
-                        
-                        val tv1 = android.widget.TextView(this@AutoClickService).apply { text = "Что видит OCR:"; setTextColor(Color.WHITE) }
-                        val imageViewOrig = android.widget.ImageView(this@AutoClickService).apply {
-                            setImageBitmap(debugBmp ?: cropped)
-                            layoutParams = android.widget.LinearLayout.LayoutParams(
-                                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
-                                300
-                            )
-                            scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
-                        }
-                        
-                        addView(tv1)
-                        addView(imageViewOrig)
-                    }
 
-                    handler.post {
-                        android.app.AlertDialog.Builder(this@AutoClickService, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                            .setTitle("Результат OCR (Huawei)")
-                            .setMessage(resultText)
-                            .setView(layout)
-                            .setPositiveButton("ОК", null)
-                            .setOnDismissListener {
-                                if (isRegionSelected && !cropped.isRecycled) cropped.recycle()
-                                debugBmp?.recycle()
+                    var isMatch = false
+                    var debugMsg = ""
+                    
+                    if (node.isSmartOcr) {
+                        val parsedVal = parseNumericValue(recognizedText, node.ocrCustomSuffixes)
+                        if (parsedVal != null) {
+                            isMatch = when (node.ocrOperator) {
+                                ">" -> parsedVal > node.ocrTargetValue
+                                "<" -> parsedVal < node.ocrTargetValue
+                                ">=" -> parsedVal >= node.ocrTargetValue
+                                "<=" -> parsedVal <= node.ocrTargetValue
+                                "==" -> parsedVal == node.ocrTargetValue
+                                "!=" -> parsedVal != node.ocrTargetValue
+                                else -> false
                             }
-                            .apply {
-                                val dialog = create()
-                                dialog.window?.setType(WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY)
-                                dialog.show()
-                            }
+                            debugMsg = "Шаг ${node.id}: [Смарт OCR] Текст='$recognizedText', Число=$parsedVal. Условие: $parsedVal ${node.ocrOperator} ${node.ocrTargetValue} -> $isMatch"
+                        } else {
+                            debugMsg = "Шаг ${node.id}: [Смарт OCR] Текст='$recognizedText'. Не удалось распознать число."
+                        }
+                    } else {
+                        val ocrMatch = fuzzyContains(recStrOcr, searchStr, maxCost) ||
+                                      fuzzyContains(recognizedText.lowercase().replace(Regex("\s+"), ""),
+                                                   searchStrOrig.lowercase().replace(Regex("\s+"), ""),
+                                                   maxCost)
+                        isMatch = ocrMatch
+                        debugMsg = "Шаг ${node.id}: [OCR] '$recognizedText'. Ищем: '${node.targetText}'. Совпадение: $isMatch"
+                    }
+                    
+                    if (::uiManager.isInitialized) {
+                        handler.post {
+                            uiManager.logDebug(debugMsg)
+                            val finalBmp = debugBmp ?: cropped
+                            uiManager.showOcrResultDialog(recognizedText, searchStrOrig, isMatch, finalBmp)
+                        }
                     }
                 } catch (e: Exception) {
-                    if (isRegionSelected) cropped.recycle()
                     e.printStackTrace()
                     handler.post { Toast.makeText(this@AutoClickService, "Ошибка: ${e.message}", Toast.LENGTH_SHORT).show() }
                 }
@@ -893,7 +873,6 @@ class AutoClickService : AccessibilityService() {
             val startY = node.textZoneStartY
             val endX = node.textZoneEndX
             val endY = node.textZoneEndY
-            
             val left = minOf(startX, endX).coerceIn(0, bitmap.width - 1)
             val top = minOf(startY, endY).coerceIn(0, bitmap.height - 1)
             val right = maxOf(startX, endX).coerceIn(0, bitmap.width - 1)
@@ -901,20 +880,8 @@ class AutoClickService : AccessibilityService() {
             val w = maxOf(1, right - left)
             val h = maxOf(1, bottom - top)
             
-            val scale = node.checkResolutionScale.coerceIn(0.1f, 1.0f)
             var isRegionSelected = !(left == 0 && top == 0 && right == 0 && bottom == 0)
             var cropped = if (isRegionSelected) Bitmap.createBitmap(bitmap, left, top, w, h) else bitmap
-            var isScaledDown = false
-            
-            if (scale < 1.0f) {
-                val sw = (cropped.width * scale).toInt().coerceAtLeast(1)
-                val sh = (cropped.height * scale).toInt().coerceAtLeast(1)
-                val scaled = Bitmap.createScaledBitmap(cropped, sw, sh, true)
-                if (isRegionSelected) cropped.recycle()
-                cropped = scaled
-                isRegionSelected = true // Ensure we recycle the scaled bitmap later
-                isScaledDown = true
-            }
             
             Thread {
                 try {
@@ -935,19 +902,11 @@ class AutoClickService : AccessibilityService() {
                         if (node.ocrFullScreenClick && result != null) {
                             val searchStr = normalizeCyrillic(searchStrOrig).replace(" ", "").lowercase()
                             val maxCost = if (searchStr.length <= 3) 0 else if (searchStr.length <= 6) 1 else searchStr.length / 4
+
                             for (block in result.blocks) {
                                 for (line in block.contents) {
-                                    for (word in line.contents) {
-                                        val wordStr = normalizeCyrillic(word.stringValue ?: "").replace(" ", "").lowercase()
-                                        if (fuzzyContains(wordStr, searchStr, maxCost)) {
-                                            foundRect = word.border
-                                            break
-                                        }
-                                    }
-                                    if (foundRect != null) break
-                                    
-                                    val lineStr = normalizeCyrillic(line.stringValue ?: "").replace(" ", "").lowercase()
-                                    if (fuzzyContains(lineStr, searchStr, maxCost)) {
+                                    val blockText = normalizeCyrillic(line.stringValue).replace(" ", "").lowercase()
+                                    if (fuzzyContains(blockText, searchStr, maxCost)) {
                                         foundRect = line.border
                                         break
                                     }
@@ -958,40 +917,57 @@ class AutoClickService : AccessibilityService() {
                         if (enhanced != cropped) enhanced.recycle()
                     }
                     
-                    if (foundRect != null) {
-                        if (isScaledDown) {
-                            node.x = left + (foundRect.centerX() / scale).toInt()
-                            node.y = top + (foundRect.centerY() / scale).toInt()
-                        } else {
-                            node.x = left + foundRect.centerX()
-                            node.y = top + foundRect.centerY()
-                        }
-                    }
-                    
                     val searchStr = normalizeCyrillic(searchStrOrig).replace(" ", "")
                     val recStrOcr = normalizeCyrillic(recognizedText).replace(" ", "")
                     
                     val maxCost = if (searchStr.length <= 3) 0 else if (searchStr.length <= 6) 1 else searchStr.length / 4
                     
-                    val ocrMatch = fuzzyContains(recStrOcr, searchStr, maxCost) || 
-                                 fuzzyContains(recognizedText.lowercase().replace(Regex("\\s+"), ""), 
-                                              searchStrOrig.lowercase().replace(Regex("\\s+"), ""), 
-                                              maxCost)
-                                              
-                    val isMatch = ocrMatch
+                    var isMatch = false
+                    var debugMsg = ""
+                    
+                    if (node.isSmartOcr) {
+                        val parsedVal = parseNumericValue(recognizedText, node.ocrCustomSuffixes)
+                        if (parsedVal != null) {
+                            isMatch = when (node.ocrOperator) {
+                                ">" -> parsedVal > node.ocrTargetValue
+                                "<" -> parsedVal < node.ocrTargetValue
+                                ">=" -> parsedVal >= node.ocrTargetValue
+                                "<=" -> parsedVal <= node.ocrTargetValue
+                                "==" -> parsedVal == node.ocrTargetValue
+                                "!=" -> parsedVal != node.ocrTargetValue
+                                else -> false
+                            }
+                            debugMsg = "Шаг ${node.id}: [Смарт OCR] Текст='$recognizedText', Число=$parsedVal. Условие: $parsedVal ${node.ocrOperator} ${node.ocrTargetValue} -> $isMatch"
+                        } else {
+                            debugMsg = "Шаг ${node.id}: [Смарт OCR] Текст='$recognizedText'. Не удалось распознать число."
+                        }
+                    } else {
+                        val ocrMatch = fuzzyContains(recStrOcr, searchStr, maxCost) ||
+                                      fuzzyContains(recognizedText.lowercase().replace(Regex("\s+"), ""),
+                                                   searchStrOrig.lowercase().replace(Regex("\s+"), ""),
+                                                   maxCost)
+                        isMatch = ocrMatch
+                        debugMsg = "Шаг ${node.id}: [OCR] '$recognizedText'. Ищем: '${node.targetText}'. Совпадение: $isMatch"
+                    }
                     
                     if (::uiManager.isInitialized) {
                         handler.post {
-                            uiManager.logDebug("Шаг ${node.id}: [OCR] '$recognizedText'. Ищем: '${node.targetText}'. Совпадение: $ocrMatch -> $isMatch")
+                            uiManager.logDebug(debugMsg)
                         }
                     }
                     
-                    if (isRegionSelected) cropped.recycle()
+                    if (isRegionSelected && !cropped.isRecycled) cropped.recycle()
+                    
+                    if (isMatch && node.ocrFullScreenClick && foundRect != null) {
+                        val clickX = left + foundRect.centerX()
+                        val clickY = top + foundRect.centerY()
+                        performGlobalClick(clickX, clickY, node.clickDurationMs)
+                    }
                     
                     val finalResult = if (node.colorOperator == "!=") !isMatch else isMatch
                     handler.post { callback(finalResult) }
                 } catch (e: Exception) {
-                    if (isRegionSelected) cropped.recycle()
+                    if (isRegionSelected && !cropped.isRecycled) cropped.recycle()
                     if (::uiManager.isInitialized) {
                         handler.post { uiManager.logDebug("OCR Ошибка: ${e.message}") }
                     }
@@ -999,10 +975,8 @@ class AutoClickService : AccessibilityService() {
                 }
             }.start()
         } catch (e: Exception) {
-            if (::uiManager.isInitialized) {
-                uiManager.logDebug("OCR Критическая Ошибка: ${e.message}")
-            }
             e.printStackTrace()
+            handler.post { Toast.makeText(this, "Ошибка: ${e.message}", Toast.LENGTH_SHORT).show() }
             callback(false)
         }
     }
