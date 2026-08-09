@@ -16,6 +16,7 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.HorizontalScrollView
 import android.widget.TextView
 import android.widget.Toast
 
@@ -362,28 +363,7 @@ class UIManager(private val service: AutoClickService) {
             }
         }
         
-        val minMaxBtn = Button(service).apply {
-            text = "➖"
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.TRANSPARENT)
-            layoutParams = LinearLayout.LayoutParams(dpToPx(40), dpToPx(40))
-            setPadding(0, 0, 0, 0)
-            
-            var isMinimized = false
-            setOnClickListener {
-                isMinimized = !isMinimized
-                text = if (isMinimized) "➕" else "➖"
-                val vis = if (isMinimized) View.GONE else View.VISIBLE
-                playBtn.visibility = vis
-                recordBtn.visibility = if (isMinimized || appMode != AppMode.RECORD) View.GONE else View.VISIBLE
-                toggleVisBtn.visibility = if (isMinimized || !showEyeBtn) View.GONE else View.VISIBLE
-                linesToggleBtn.visibility = if (isMinimized || !showLinesBtn) View.GONE else View.VISIBLE
-                hotbarToggleBtn.visibility = if (isMinimized || !showHotbarBtn) View.GONE else View.VISIBLE
-                gearBtn.visibility = if (isMinimized || !showSettingsBtn) View.GONE else View.VISIBLE
-                exitBtn.visibility = vis
-                if (isMinimized) hotbarRow.visibility = View.GONE
-            }
-        }
+
         
         val hotbarToggleBtn = Button(service).apply {
             text = "⚡"
@@ -414,6 +394,29 @@ class UIManager(private val service: AutoClickService) {
                 text = if (service.showLines) "🕸" else "🕸✖"
                 linesOverlayView?.visibility = if (service.showLines) View.VISIBLE else View.INVISIBLE
                 linesOverlayView?.visibility = if (service.showLines) View.VISIBLE else View.INVISIBLE; linesOverlayView?.invalidate()
+            }
+        }
+
+        val minMaxBtn = Button(service).apply {
+            text = "➖"
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.TRANSPARENT)
+            layoutParams = LinearLayout.LayoutParams(dpToPx(40), dpToPx(40))
+            setPadding(0, 0, 0, 0)
+            
+            var isMinimized = false
+            setOnClickListener {
+                isMinimized = !isMinimized
+                text = if (isMinimized) "➕" else "➖"
+                val vis = if (isMinimized) View.GONE else View.VISIBLE
+                playBtn.visibility = vis
+                recordBtn.visibility = if (isMinimized || appMode != AppMode.RECORD) View.GONE else View.VISIBLE
+                toggleVisBtn.visibility = if (isMinimized || !showEyeBtn) View.GONE else View.VISIBLE
+                linesToggleBtn.visibility = if (isMinimized || !showLinesBtn) View.GONE else View.VISIBLE
+                hotbarToggleBtn.visibility = if (isMinimized || !showHotbarBtn) View.GONE else View.VISIBLE
+                gearBtn.visibility = if (isMinimized || !showSettingsBtn) View.GONE else View.VISIBLE
+                exitBtn.visibility = vis
+                if (isMinimized) hotbarRow.visibility = View.GONE
             }
         }
 
