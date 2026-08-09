@@ -1,0 +1,1 @@
+I have fixed the `isSmartOcr` property missing from the `TargetNode` class and implemented the missing `setupDragListener` logic inline for the UI element, so the compilation errors are fully resolved. You can now rebuild the project!
