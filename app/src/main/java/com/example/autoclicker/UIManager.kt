@@ -1605,30 +1605,59 @@ class UIManager(private val service: AutoClickService) {
             setTextColor(Color.WHITE)
             setScaledTextSize(16f)
         })
-        val typeSwitch = android.widget.Switch(service).apply {
-            text = if (node.type == NodeType.CHECK_COLOR) "ТРИГГЕР " else "КЛИК "
-            setTextColor(Color.YELLOW)
-            isChecked = node.type == NodeType.CHECK_COLOR
+        val typeSpinner = android.widget.Spinner(service).apply {
+            val items = arrayOf("КЛИК", "ТРИГГЕР", "МАКРОС")
+            val adapter = android.widget.ArrayAdapter(service, android.R.layout.simple_spinner_dropdown_item, items)
+            this.adapter = adapter
+            setSelection(when(node.type) {
+                NodeType.CLICK -> 0
+                NodeType.CHECK_COLOR -> 1
+                NodeType.MACRO -> 2
+            })
             visibility = if (appMode == AppMode.ADVANCED) View.VISIBLE else View.GONE
-            setOnCheckedChangeListener { _, isChecked ->
-                node.type = if (isChecked) NodeType.CHECK_COLOR else NodeType.CLICK
-                showEditNodeMenu(node)
-                nodeViews[node.id]?.invalidate()
+            onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(p0: android.widget.AdapterView<*>?, p1: View?, pos: Int, id: Long) {
+                    val newType = when(pos) {
+                        0 -> NodeType.CLICK
+                        1 -> NodeType.CHECK_COLOR
+                        2 -> NodeType.MACRO
+                        else -> NodeType.CLICK
+                    }
+                    if (node.type != newType) {
+                        node.type = newType
+                        showEditNodeMenu(node)
+                        nodeViews[node.id]?.invalidate()
+                    }
+                }
+                override fun onNothingSelected(p0: android.widget.AdapterView<*>?) {}
             }
         }
-        headerLayout.addView(typeSwitch)
+        headerLayout.addView(typeSpinner)
         
-        if (node.type == NodeType.CHECK_COLOR && appMode == AppMode.ADVANCED) {
-            val skipSwitch = android.widget.Switch(service).apply {
-                text = "Пропуск очереди"
-                setTextColor(Color.CYAN)
-                isChecked = node.skipSequentialExecution
+        if (appMode == AppMode.ADVANCED) {
+            if (node.type == NodeType.CHECK_COLOR || node.type == NodeType.MACRO) {
+                val skipSwitch = android.widget.Switch(service).apply {
+                    text = "Функция (Пропуск в очереди)"
+                    setTextColor(Color.CYAN)
+                    isChecked = node.skipSequentialExecution
+                    setOnCheckedChangeListener { _, isChecked ->
+                        node.skipSequentialExecution = isChecked
+                    }
+                    setPadding(20, 0, 0, 0)
+                }
+                headerLayout.addView(skipSwitch)
+            }
+            
+            val threadSwitch = android.widget.Switch(service).apply {
+                text = "Отдельный поток (Параллельно)"
+                setTextColor(Color.parseColor("#FFA500")) // Orange
+                isChecked = node.isIndependentThread
                 setOnCheckedChangeListener { _, isChecked ->
-                    node.skipSequentialExecution = isChecked
+                    node.isIndependentThread = isChecked
                 }
                 setPadding(20, 0, 0, 0)
             }
-            headerLayout.addView(skipSwitch)
+            headerLayout.addView(threadSwitch)
         }
         content.addView(headerLayout)
 
@@ -1834,6 +1863,52 @@ class UIManager(private val service: AutoClickService) {
             body.addView(applyAntiDetectBtn)
         }
         if (node.type == NodeType.CHECK_COLOR) {
+            antiDetectSection.visibility = View.GONE
+        }
+        
+        val macroSection = addSection("Настройки Макроса", node.macroProfileName != null) { body ->
+            val tvMacroDesc = TextView(service).apply {
+                text = "Если условие выполнится, будет загружен и запущен выбранный профиль."
+                setTextColor(Color.LTGRAY)
+                setScaledTextSize(12f)
+                setPadding(0, 0, 0, 10)
+            }
+            body.addView(tvMacroDesc)
+            
+            val prefs = service.getSharedPreferences("AutoClickerProfiles", android.content.Context.MODE_PRIVATE)
+            val allKeys = prefs.all.keys.toList()
+            val spinnerItems = mutableListOf("— Не выбрано —")
+            spinnerItems.addAll(allKeys)
+            
+            val macroSpinner = android.widget.Spinner(service).apply {
+                val adapter = android.widget.ArrayAdapter(service, android.R.layout.simple_spinner_dropdown_item, spinnerItems)
+                this.adapter = adapter
+                
+                val currentIdx = spinnerItems.indexOf(node.macroProfileName ?: "")
+                if (currentIdx != -1) {
+                    setSelection(currentIdx)
+                }
+                onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+                    override fun onItemSelected(p0: android.widget.AdapterView<*>?, p1: View?, pos: Int, id: Long) {
+                        if (pos == 0) {
+                            node.macroProfileName = null
+                        } else {
+                            node.macroProfileName = spinnerItems[pos]
+                        }
+                    }
+                    override fun onNothingSelected(p0: android.widget.AdapterView<*>?) {}
+                }
+            }
+            body.addView(macroSpinner)
+        }
+        if (node.type != NodeType.MACRO) {
+            macroSection.visibility = View.GONE
+            if (node.type == NodeType.CHECK_COLOR) {
+                // If it's just check color (trigger), no antidetect
+                antiDetectSection.visibility = View.GONE
+            }
+        } else {
+            // It's a macro. Hide antidetect
             antiDetectSection.visibility = View.GONE
         }
 
@@ -2390,7 +2465,7 @@ class UIManager(private val service: AutoClickService) {
         if (appMode == AppMode.SINGLE) {
             syncSwipeSection.visibility = View.GONE
         }
-            if (node.type == NodeType.CHECK_COLOR) {
+            if (node.type == NodeType.CHECK_COLOR || node.type == NodeType.MACRO) {
                 swipeLayout.visibility = View.GONE
                 swipeDurRow.visibility = View.GONE
                 swipeDeltaLayout.visibility = View.GONE

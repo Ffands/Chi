@@ -331,8 +331,10 @@ class AutoClickService : AccessibilityService() {
             
             var threadIdCounter = 1
             for (n in nodes) {
-                if (!n.skipSequentialExecution && !allTargets.contains(n.id)) {
-                    activeThreads.add(ExecutionThread(threadIdCounter++, n.id))
+                if (!n.skipSequentialExecution) {
+                    if (n.isIndependentThread || !allTargets.contains(n.id)) {
+                        activeThreads.add(ExecutionThread(threadIdCounter++, n.id))
+                    }
                 }
             }
             
@@ -424,6 +426,23 @@ class AutoClickService : AccessibilityService() {
                 } else if (node.triggerMode == 2 && node.ocrFullScreenClick) {
                     if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId} Шаг ${node.id}: OCR Клик")
                     performGestureForNodes(mutableListOf(node))
+                } else if (node.type == NodeType.MACRO && !node.macroProfileName.isNullOrEmpty()) {
+                    if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId} Шаг ${node.id}: Запуск макроса ${node.macroProfileName}")
+                    val oldMaxId = if (nodes.isNotEmpty()) nodes.maxOf { it.id } else 0
+                    val offset = oldMaxId + 1
+                    
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        loadProfile(node.macroProfileName!!, append = true)
+                        
+                        // We need to route this thread to the first node of the loaded macro
+                        thread.currentRepetition = 0
+                        thread.currentNodeId = offset
+                        
+                        uiManager.recreateFloatingControlBar()
+                        // Resume the thread pointing to the macro's start
+                        scheduleNextExecution(thread, node.delayAfterMs)
+                    }
+                    return@checkConditionForNode // Wait for the async load
                 } else {
                     if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId} Шаг ${node.id}: Условие сработало")
                 }

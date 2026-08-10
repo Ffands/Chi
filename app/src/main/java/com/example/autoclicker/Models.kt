@@ -2,7 +2,7 @@ package com.example.autoclicker
 
 import android.graphics.Color
 
-enum class NodeType { CLICK, CHECK_COLOR }
+enum class NodeType { CLICK, CHECK_COLOR, MACRO }
 enum class AppMode { SINGLE, SEQUENTIAL, ADVANCED, RECORD }
 
 data class TargetNode(
@@ -11,6 +11,7 @@ data class TargetNode(
     var x: Int = 0,
     var y: Int = 0,
     var targetColor: Int? = null,
+    var macroProfileName: String? = null,
     var targetImageBase64: String? = null,
     var targetText: String? = null,
     var targetLanguage: String = "rus", // "rus" or "eng"
@@ -27,6 +28,7 @@ data class TargetNode(
     var nextNodeIdOnSuccess: Int? = null,
     var nextNodeIdOnFail: Int? = null,
     var skipSequentialExecution: Boolean = false,
+    var isIndependentThread: Boolean = false,
     var isVisible: Boolean = true,
     var crosshairColor: Int = Color.RED,
     var numberColor: Int = Color.WHITE,
@@ -78,49 +80,51 @@ data class TargetNode(
         obj.put("x", x)
         obj.put("y", y)
         if (targetColor != null) obj.put("targetColor", targetColor)
+        if (macroProfileName != null) obj.put("macroProfileName", macroProfileName)
         if (targetImageBase64 != null) obj.put("targetImageBase64", targetImageBase64)
         if (targetText != null) obj.put("targetText", targetText)
-        obj.put("targetLanguage", targetLanguage)
-        obj.put("triggerMode", triggerMode)
-        obj.put("dynamicColorUpdate", dynamicColorUpdate)
+        if (targetLanguage != "rus") obj.put("targetLanguage", targetLanguage)
+        if (triggerMode != -1) obj.put("triggerMode", triggerMode)
+        if (dynamicColorUpdate) obj.put("dynamicColorUpdate", dynamicColorUpdate)
         if (compareToNodeId != null) obj.put("compareToNodeId", compareToNodeId)
         if (colorCompareX != null) obj.put("colorCompareX", colorCompareX)
         if (colorCompareY != null) obj.put("colorCompareY", colorCompareY)
-        obj.put("imageThreshold", imageThreshold.toDouble())
-        obj.put("searchRadius", searchRadius)
-        obj.put("delayAfterMs", delayAfterMs)
-        obj.put("randomizeDelayMs", randomizeDelayMs)
-        obj.put("randomizeRadius", randomizeRadius)
+        if (imageThreshold != 80.0f) obj.put("imageThreshold", imageThreshold.toDouble())
+        if (searchRadius != 0) obj.put("searchRadius", searchRadius)
+        if (delayAfterMs != 300L) obj.put("delayAfterMs", delayAfterMs)
+        if (randomizeDelayMs != 0L) obj.put("randomizeDelayMs", randomizeDelayMs)
+        if (randomizeRadius != 0) obj.put("randomizeRadius", randomizeRadius)
         if (nextNodeIdOnSuccess != null) obj.put("nextNodeIdOnSuccess", nextNodeIdOnSuccess)
         if (nextNodeIdOnFail != null) obj.put("nextNodeIdOnFail", nextNodeIdOnFail)
-        obj.put("skipSequentialExecution", skipSequentialExecution)
-        obj.put("isVisible", isVisible)
-        obj.put("crosshairColor", crosshairColor)
-        obj.put("numberColor", numberColor)
-        obj.put("sizeScale", sizeScale.toDouble())
+        if (skipSequentialExecution) obj.put("skipSequentialExecution", skipSequentialExecution)
+        if (isIndependentThread) obj.put("isIndependentThread", isIndependentThread)
+        if (!isVisible) obj.put("isVisible", isVisible)
+        if (crosshairColor != Color.RED) obj.put("crosshairColor", crosshairColor)
+        if (numberColor != Color.WHITE) obj.put("numberColor", numberColor)
+        if (sizeScale != 1.0f) obj.put("sizeScale", sizeScale.toDouble())
         if (syncWithNodeIds.isNotEmpty()) obj.put("syncWithNodeIds", syncWithNodeIds)
-        obj.put("clickDurationMs", clickDurationMs)
-        obj.put("isSwipe", isSwipe)
+        if (clickDurationMs != 50L) obj.put("clickDurationMs", clickDurationMs)
+        if (isSwipe) obj.put("isSwipe", isSwipe)
         if (swipeTargetNodeId != null) obj.put("swipeTargetNodeId", swipeTargetNodeId)
-        obj.put("swipeEndX", swipeEndX)
-        obj.put("swipeEndY", swipeEndY)
-        obj.put("swipeDurationMs", swipeDurationMs)
-        obj.put("textZoneStartX", textZoneStartX)
-        obj.put("textZoneStartY", textZoneStartY)
-        obj.put("textZoneEndX", textZoneEndX)
-        obj.put("textZoneEndY", textZoneEndY)
+        if (swipeEndX != 0) obj.put("swipeEndX", swipeEndX)
+        if (swipeEndY != 0) obj.put("swipeEndY", swipeEndY)
+        if (swipeDurationMs != 500L) obj.put("swipeDurationMs", swipeDurationMs)
+        if (textZoneStartX != 0) obj.put("textZoneStartX", textZoneStartX)
+        if (textZoneStartY != 0) obj.put("textZoneStartY", textZoneStartY)
+        if (textZoneEndX != 0) obj.put("textZoneEndX", textZoneEndX)
+        if (textZoneEndY != 0) obj.put("textZoneEndY", textZoneEndY)
         if (maxCheckCycles != null) obj.put("maxCheckCycles", maxCheckCycles)
-        obj.put("colorOperator", colorOperator)
-        obj.put("colorTolerance", colorTolerance)
+        if (colorOperator != "==") obj.put("colorOperator", colorOperator)
+        if (colorTolerance != 15) obj.put("colorTolerance", colorTolerance)
         if (linkedConditionNodeId != null) obj.put("linkedConditionNodeId", linkedConditionNodeId)
-        obj.put("linkedConditionOperator", linkedConditionOperator)
-        obj.put("repetitions", repetitions)
-        obj.put("ocrFullScreenClick", ocrFullScreenClick)
-        obj.put("checkResolutionScale", checkResolutionScale.toDouble())
-        obj.put("isSmartOcr", isSmartOcr)
-        obj.put("ocrOperator", ocrOperator)
-        obj.put("ocrTargetValue", ocrTargetValue)
-        obj.put("ocrCustomSuffixes", ocrCustomSuffixes)
+        if (linkedConditionOperator != "AND") obj.put("linkedConditionOperator", linkedConditionOperator)
+        if (repetitions != 1) obj.put("repetitions", repetitions)
+        if (ocrFullScreenClick) obj.put("ocrFullScreenClick", ocrFullScreenClick)
+        if (checkResolutionScale != 1.0f) obj.put("checkResolutionScale", checkResolutionScale.toDouble())
+        if (isSmartOcr) obj.put("isSmartOcr", isSmartOcr)
+        if (ocrOperator != ">=") obj.put("ocrOperator", ocrOperator)
+        if (ocrTargetValue != 0.0) obj.put("ocrTargetValue", ocrTargetValue)
+        if (ocrCustomSuffixes != "k:1000,m:1000000,b:1000000000,к:1000,м:1000000,б:1000000000") obj.put("ocrCustomSuffixes", ocrCustomSuffixes)
         if (swipePathPoints.isNotEmpty()) {
             val pointArr = org.json.JSONArray()
             for (p in swipePathPoints) {
@@ -138,6 +142,7 @@ data class TargetNode(
         fun fromJson(obj: org.json.JSONObject): TargetNode {
             val tMode = obj.optInt("triggerMode", -1)
             val tColor = if (obj.has("targetColor")) obj.getInt("targetColor") else null
+            val tMacro = obj.optString("macroProfileName", null).takeIf { it?.isNotEmpty() == true }
             val tImage = obj.optString("targetImageBase64", null).takeIf { it?.isNotEmpty() == true }
             val tText = obj.optString("targetText", null).takeIf { it?.isNotEmpty() == true }
             
@@ -156,6 +161,7 @@ data class TargetNode(
                 x = obj.getInt("x"),
                 y = obj.getInt("y"),
                 targetColor = tColor,
+                macroProfileName = tMacro,
                 targetImageBase64 = tImage,
                 targetText = tText,
                 targetLanguage = obj.optString("targetLanguage", "rus"),
