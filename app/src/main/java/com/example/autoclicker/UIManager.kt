@@ -1099,7 +1099,7 @@ class UIManager(private val service: AutoClickService) {
                 setBackgroundColor(if (appMode == mode) Color.parseColor("#4CAF50") else Color.parseColor("#555555"))
                 setTextColor(Color.WHITE)
                 setOnClickListener {
-                    if (mode == AppMode.SINGLE && service.nodes.size > 1) {
+                    if (mode == AppMode.SEQUENTIAL && service.nodes.size > 1) {
                         val first = service.nodes.firstOrNull()
                         service.nodes.clear()
                         nodeViews.values.forEach { windowManager.removeView(it) }
