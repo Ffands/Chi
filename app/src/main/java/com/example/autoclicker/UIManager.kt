@@ -422,13 +422,23 @@ class UIManager(private val service: AutoClickService) {
 
         }
 
+        val scrollContent = LinearLayout(service).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+        val topScroll = android.widget.HorizontalScrollView(service).apply {
+            isHorizontalScrollBarEnabled = false
+            layoutParams = LinearLayout.LayoutParams(dpToPx(180), LinearLayout.LayoutParams.WRAP_CONTENT)
+            addView(scrollContent)
+        }
+
         topRow.addView(dragHandle)
         topRow.addView(minMaxBtn)
-        topRow.addView(playBtn)
-        topRow.addView(recordBtn)
-        topRow.addView(toggleVisBtn)
-        topRow.addView(linesToggleBtn)
-        topRow.addView(hotbarToggleBtn)
+        scrollContent.addView(playBtn)
+        scrollContent.addView(recordBtn)
+        scrollContent.addView(toggleVisBtn)
+        scrollContent.addView(linesToggleBtn)
+        scrollContent.addView(hotbarToggleBtn)
+        topRow.addView(topScroll)
         topRow.addView(gearBtn)
         topRow.addView(exitBtn)
         
@@ -793,7 +803,7 @@ class UIManager(private val service: AutoClickService) {
             text = "Меню Автокликера"
             setTextColor(Color.WHITE)
             setScaledTextSize(16f)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            layoutParams = LinearLayout.LayoutParams(dpToPx(180), LinearLayout.LayoutParams.WRAP_CONTENT)
         }
         val helpBtn = Button(service).apply {
             text = "?"
@@ -894,7 +904,7 @@ class UIManager(private val service: AutoClickService) {
             val title = TextView(service).apply {
                 text = "[${node.id}] ${if(node.type==NodeType.CLICK) "Клик" else "Пров."}"
                 setTextColor(Color.WHITE)
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                layoutParams = LinearLayout.LayoutParams(dpToPx(180), LinearLayout.LayoutParams.WRAP_CONTENT)
             }
             val editBtn = Button(service).apply {
                 text = "Настр."
@@ -1335,7 +1345,7 @@ class UIManager(private val service: AutoClickService) {
                     text = profileName
                     setBackgroundColor(Color.parseColor("#444444"))
                     setTextColor(Color.WHITE)
-                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                    layoutParams = LinearLayout.LayoutParams(dpToPx(180), LinearLayout.LayoutParams.WRAP_CONTENT)
                     setOnClickListener {
                         nameEdit.setText(profileName)
                         if (!isSaving) {
@@ -3060,7 +3070,7 @@ class UIManager(private val service: AutoClickService) {
                 text = "Дебаг Лог"
                 setTextColor(Color.WHITE)
                 setScaledTextSize(14f)
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                layoutParams = LinearLayout.LayoutParams(dpToPx(180), LinearLayout.LayoutParams.WRAP_CONTENT)
             })
             addView(Button(service).apply {
                 text = "X"
@@ -3091,7 +3101,7 @@ class UIManager(private val service: AutoClickService) {
             orientation = LinearLayout.HORIZONTAL
             addView(Button(service).apply {
                 text = "Очистить"
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                layoutParams = LinearLayout.LayoutParams(dpToPx(180), LinearLayout.LayoutParams.WRAP_CONTENT)
                 setOnClickListener {
                     debugLogs.clear()
                     debugTextView?.text = ""
