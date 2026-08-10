@@ -398,6 +398,15 @@ class UIManager(private val service: AutoClickService) {
             }
         }
 
+        val scrollContent = LinearLayout(service).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+        val topScroll = android.widget.HorizontalScrollView(service).apply {
+            isHorizontalScrollBarEnabled = false
+            layoutParams = LinearLayout.LayoutParams(dpToPx(180), LinearLayout.LayoutParams.WRAP_CONTENT)
+            addView(scrollContent)
+        }
+
         val minMaxBtn = Button(service).apply {
             text = "➖"
             setTextColor(Color.WHITE)
@@ -417,19 +426,12 @@ class UIManager(private val service: AutoClickService) {
                 hotbarToggleBtn.visibility = if (isMinimized || !showHotbarBtn) View.GONE else View.VISIBLE
                 gearBtn.visibility = if (isMinimized) View.GONE else View.VISIBLE
                 exitBtn.visibility = vis
+                topScroll.visibility = vis
                 if (isMinimized) hotbarRow.visibility = View.GONE
             }
 
         }
 
-        val scrollContent = LinearLayout(service).apply {
-            orientation = LinearLayout.HORIZONTAL
-        }
-        val topScroll = android.widget.HorizontalScrollView(service).apply {
-            isHorizontalScrollBarEnabled = false
-            layoutParams = LinearLayout.LayoutParams(dpToPx(180), LinearLayout.LayoutParams.WRAP_CONTENT)
-            addView(scrollContent)
-        }
 
         topRow.addView(dragHandle)
         topRow.addView(minMaxBtn)
