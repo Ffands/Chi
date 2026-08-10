@@ -393,6 +393,10 @@ class AutoClickService : AccessibilityService() {
         }
     }
 
+        private fun scheduleNextExecution(thread: ExecutionThread, delayMs: Long) {
+        handler.postDelayed({ executeThread(thread) }, delayMs)
+    }
+
     private fun executeThread(thread: ExecutionThread) {
         if (!isPlaying || !thread.isActive) return
 

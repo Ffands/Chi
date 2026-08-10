@@ -2602,7 +2602,7 @@ class UIManager(private val service: AutoClickService) {
         val swipeDeltaLayout = LinearLayout(service).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 10, 0, 0) }
         val modeSpinnerLayout = LinearLayout(service).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         modeSpinnerLayout.addView(TextView(service).apply { text = "Режим свайпа: "; setTextColor(Color.WHITE) })
-        val modeSpinner = Spinner(service).apply {
+        val modeSpinner = android.widget.Spinner(service).apply {
             adapter = android.widget.ArrayAdapter(service, android.R.layout.simple_spinner_item, arrayOf("Вектор (Суб-метка)", "К метке (ID)", "Ломаная линия (Жест)"))
             setSelection(if (node.swipePathPoints.isNotEmpty()) 2 else if (node.swipeTargetNodeId != null) 1 else 0)
         }
@@ -2931,6 +2931,45 @@ class UIManager(private val service: AutoClickService) {
         val view = swipeEndViews.remove(id)
         if (view != null) windowManager.removeView(view)
         swipeEndParams.remove(id)
+    }
+
+    fun setupColorCompareTouchListener(view: View, params: WindowManager.LayoutParams, node: TargetNode) {
+        var initialX = 0
+        var initialY = 0
+        var initialTouchX = 0f
+        var initialTouchY = 0f
+
+        view.setOnTouchListener { _, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    initialX = params.x
+                    initialY = params.y
+                    initialTouchX = event.rawX
+                    initialTouchY = event.rawY
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    params.x = initialX + (event.rawX - initialTouchX).toInt()
+                    params.y = initialY + (event.rawY - initialTouchY).toInt()
+                    windowManager.updateViewLayout(view, params)
+                    val newEx = params.x + dpToPx(20)
+                    val newEy = params.y + dpToPx(20)
+                    node.colorCompareX = newEx
+                    node.colorCompareY = newEy
+                    invalidateLines()
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    val newEx = params.x + dpToPx(20)
+                    val newEy = params.y + dpToPx(20)
+                    node.colorCompareX = newEx
+                    node.colorCompareY = newEy
+                    invalidateLines()
+                    true
+                }
+                else -> false
+            }
+        }
     }
 
     fun setupSwipeEndTouchListener(view: View, params: WindowManager.LayoutParams, node: TargetNode) {

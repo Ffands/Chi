@@ -179,6 +179,18 @@ data class TargetNode(
                 }
             }
             
+
+            val mRoutes = mutableListOf<ManagerRoute>()
+            if (obj.has("managerRoutes")) {
+                val routesArray = obj.getJSONArray("managerRoutes")
+                for (i in 0 until routesArray.length()) {
+                    val rObj = routesArray.getJSONObject(i)
+                    mRoutes.add(ManagerRoute(
+                        checkNodeId = rObj.getInt("checkNodeId"),
+                        onSuccessGoToId = rObj.getInt("onSuccessGoToId")
+                    ))
+                }
+            }
             return TargetNode(
                 id = obj.getInt("id"),
                 type = NodeType.valueOf(obj.getString("type")),
