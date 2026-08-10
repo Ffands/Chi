@@ -12,6 +12,7 @@ data class TargetNode(
     var y: Int = 0,
     var targetColor: Int? = null,
     var macroProfileName: String? = null,
+    var macroRunParallel: Boolean = false,
     var targetImageBase64: String? = null,
     var targetText: String? = null,
     var targetLanguage: String = "rus", // "rus" or "eng"
@@ -81,6 +82,7 @@ data class TargetNode(
         obj.put("y", y)
         if (targetColor != null) obj.put("targetColor", targetColor)
         if (macroProfileName != null) obj.put("macroProfileName", macroProfileName)
+        if (macroRunParallel) obj.put("macroRunParallel", macroRunParallel)
         if (targetImageBase64 != null) obj.put("targetImageBase64", targetImageBase64)
         if (targetText != null) obj.put("targetText", targetText)
         if (targetLanguage != "rus") obj.put("targetLanguage", targetLanguage)
@@ -143,6 +145,7 @@ data class TargetNode(
             val tMode = obj.optInt("triggerMode", -1)
             val tColor = if (obj.has("targetColor")) obj.getInt("targetColor") else null
             val tMacro = obj.optString("macroProfileName", null).takeIf { it?.isNotEmpty() == true }
+            val mRunPar = obj.optBoolean("macroRunParallel", false)
             val tImage = obj.optString("targetImageBase64", null).takeIf { it?.isNotEmpty() == true }
             val tText = obj.optString("targetText", null).takeIf { it?.isNotEmpty() == true }
             
@@ -162,6 +165,7 @@ data class TargetNode(
                 y = obj.getInt("y"),
                 targetColor = tColor,
                 macroProfileName = tMacro,
+                macroRunParallel = mRunPar,
                 targetImageBase64 = tImage,
                 targetText = tText,
                 targetLanguage = obj.optString("targetLanguage", "rus"),

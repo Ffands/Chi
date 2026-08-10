@@ -1900,6 +1900,17 @@ class UIManager(private val service: AutoClickService) {
                 }
             }
             body.addView(macroSpinner)
+            
+            val parallelSwitch = android.widget.Switch(service).apply {
+                text = "Выполнять параллельно (Не прерывать текущий)"
+                setTextColor(Color.parseColor("#FFA500"))
+                isChecked = node.macroRunParallel
+                setOnCheckedChangeListener { _, isChecked ->
+                    node.macroRunParallel = isChecked
+                }
+                setPadding(20, 20, 0, 0)
+            }
+            body.addView(parallelSwitch)
         }
         if (node.type != NodeType.MACRO) {
             macroSection.visibility = View.GONE

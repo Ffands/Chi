@@ -143,7 +143,9 @@ class AutoClickService : AccessibilityService() {
         var currentCycle: Int = 0,
         var isWaiting: Boolean = false,
         var isActive: Boolean = true
-    )
+    ) {
+        val returnStack = java.util.Stack<Int>()
+    }
     val activeThreads = java.util.concurrent.CopyOnWriteArrayList<ExecutionThread>()
     
     // Gesture Queue
@@ -359,6 +361,12 @@ class AutoClickService : AccessibilityService() {
         if (!isPlaying || !thread.isActive) return
 
         if (thread.currentNodeId == -1) {
+            if (thread.returnStack.isNotEmpty()) {
+                thread.currentNodeId = thread.returnStack.pop()
+                if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId}: Возврат из макроса на шаг ${thread.currentNodeId}")
+                scheduleNextExecution(thread, 0L)
+                return
+            }
             thread.isActive = false
             if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId}: Достигнут шаг -1")
             checkAllThreadsStopped()
@@ -379,6 +387,13 @@ class AutoClickService : AccessibilityService() {
         val node = nodes.find { it.id == thread.currentNodeId }
         
         if (node == null) {
+            if (thread.returnStack.isNotEmpty()) {
+                thread.currentNodeId = thread.returnStack.pop()
+                if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId}: Возврат из макроса на шаг ${thread.currentNodeId}")
+                scheduleNextExecution(thread, 0L)
+                return
+            }
+            
             thread.currentNodeId = nodes.firstOrNull { !it.skipSequentialExecution }?.id
             
             if (thread.currentNodeId != null) {
@@ -427,20 +442,35 @@ class AutoClickService : AccessibilityService() {
                     if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId} Шаг ${node.id}: OCR Клик")
                     performGestureForNodes(mutableListOf(node))
                 } else if (node.type == NodeType.MACRO && !node.macroProfileName.isNullOrEmpty()) {
-                    if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId} Шаг ${node.id}: Запуск макроса ${node.macroProfileName}")
+                    if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId} Шаг ${node.id}: Запуск макроса ${node.macroProfileName} (Параллельно: ${node.macroRunParallel})")
                     val oldMaxId = if (nodes.isNotEmpty()) nodes.maxOf { it.id } else 0
                     val offset = oldMaxId + 1
                     
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
                         loadProfile(node.macroProfileName!!, append = true)
                         
-                        // We need to route this thread to the first node of the loaded macro
-                        thread.currentRepetition = 0
-                        thread.currentNodeId = offset
+                        if (node.macroRunParallel) {
+                            val newThread = ExecutionThread(
+                                threadId = activeThreads.size + 1,
+                                currentNodeId = offset
+                            )
+                            activeThreads.add(newThread)
+                            executeThread(newThread)
+                            
+                            thread.currentRepetition = 0
+                            thread.currentNodeId = node.nextNodeIdOnSuccess ?: getNextNodeLinear(node.id)
+                            scheduleNextExecution(thread, node.delayAfterMs)
+                        } else {
+                            val nextId = node.nextNodeIdOnSuccess ?: getNextNodeLinear(node.id)
+                            if (nextId != -1) {
+                                thread.returnStack.push(nextId)
+                            }
+                            thread.currentRepetition = 0
+                            thread.currentNodeId = offset
+                            scheduleNextExecution(thread, node.delayAfterMs)
+                        }
                         
                         uiManager.recreateFloatingControlBar()
-                        // Resume the thread pointing to the macro's start
-                        scheduleNextExecution(thread, node.delayAfterMs)
                     }
                     return@checkConditionForNode // Wait for the async load
                 } else {
