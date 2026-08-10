@@ -2,8 +2,28 @@ package com.example.autoclicker
 
 import android.graphics.Color
 
-enum class NodeType { CLICK, CHECK_COLOR, MACRO }
-enum class AppMode { SINGLE, SEQUENTIAL, ADVANCED, RECORD }
+enum class NodeType { CLICK, CHECK_COLOR, MACRO, MANAGER }
+enum class AppMode { SEQUENTIAL, ADVANCED, RECORD }
+
+data class ManagerRoute(
+    var checkNodeId: Int,
+    var onSuccessGoToId: Int
+) {
+    fun toJson(): org.json.JSONObject {
+        val obj = org.json.JSONObject()
+        obj.put("checkNodeId", checkNodeId)
+        obj.put("onSuccessGoToId", onSuccessGoToId)
+        return obj
+    }
+    companion object {
+        fun fromJson(obj: org.json.JSONObject): ManagerRoute {
+            return ManagerRoute(
+                obj.getInt("checkNodeId"),
+                obj.getInt("onSuccessGoToId")
+            )
+        }
+    }
+}
 
 data class TargetNode(
     var id: Int,
@@ -52,6 +72,7 @@ data class TargetNode(
     var linkedConditionOperator: String = "AND",
     var repetitions: Int = 1,
     var swipePathPoints: List<Pair<Float, Float>> = emptyList(),
+    var managerRoutes: List<ManagerRoute> = emptyList(),
     var ocrFullScreenClick: Boolean = false,
     var checkResolutionScale: Float = 1.0f,
     var isSmartOcr: Boolean = false,
@@ -204,6 +225,7 @@ data class TargetNode(
                 linkedConditionOperator = obj.optString("linkedConditionOperator", "AND"),
                 repetitions = obj.optInt("repetitions", 1),
                 swipePathPoints = pathPoints,
+                managerRoutes = mRoutes,
                 ocrFullScreenClick = obj.optBoolean("ocrFullScreenClick", false),
                 checkResolutionScale = obj.optDouble("checkResolutionScale", 1.0).toFloat(),
                 isSmartOcr = obj.optBoolean("isSmartOcr", false),

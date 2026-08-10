@@ -238,14 +238,20 @@ class AutoClickService : AccessibilityService() {
         return Bitmap.createScaledBitmap(src, sw, sh, true)
     }
 
-    private fun getHuaweiAnalyzer(): com.huawei.hms.mlsdk.text.MLTextAnalyzer {
+    private var mlTextAnalyzerLang: String = "ru"
+    
+    private fun getHuaweiAnalyzer(lang: String): com.huawei.hms.mlsdk.text.MLTextAnalyzer {
         synchronized(ocrLock) {
-            if (mlTextAnalyzer != null) return mlTextAnalyzer!!
+            val hLang = if (lang == "eng") "en" else "ru"
+            if (mlTextAnalyzer != null && mlTextAnalyzerLang == hLang) return mlTextAnalyzer!!
+            if (mlTextAnalyzer != null) mlTextAnalyzer!!.stop()
+            
             com.huawei.hms.mlsdk.common.MLApplication.getInstance().apiKey = "dummy_api_key_for_local_use_only"
             val setting = com.huawei.hms.mlsdk.text.MLLocalTextSetting.Factory()
                 .setOCRMode(com.huawei.hms.mlsdk.text.MLLocalTextSetting.OCR_DETECT_MODE)
-                .setLanguage("ru")
+                .setLanguage(hLang)
                 .create()
+            mlTextAnalyzerLang = hLang
             mlTextAnalyzer = com.huawei.hms.mlsdk.MLAnalyzerFactory.getInstance().getLocalTextAnalyzer(setting)
             return mlTextAnalyzer!!
         }
@@ -357,6 +363,36 @@ class AutoClickService : AccessibilityService() {
         uiManager.recreateFloatingControlBar()
     }
 
+    private fun evaluateManagerRoutes(routes: List<ManagerRoute>, index: Int, thread: ExecutionThread, managerNode: TargetNode) {
+        if (!isPlaying || !thread.isActive) return
+        if (index >= routes.size) {
+            thread.currentRepetition = 0
+            thread.currentNodeId = managerNode.nextNodeIdOnFail ?: getNextNodeLinear(managerNode.id)
+            if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId} Шаг ${managerNode.id}: Менеджер -> ${thread.currentNodeId} (По умолчанию)")
+            scheduleNextExecution(thread, managerNode.delayAfterMs)
+            return
+        }
+        
+        val route = routes[index]
+        val nodeToCheck = nodes.find { it.id == route.checkNodeId }
+        if (nodeToCheck == null || !nodeHasCondition(nodeToCheck)) {
+            evaluateManagerRoutes(routes, index + 1, thread, managerNode)
+            return
+        }
+        
+        checkConditionForNode(nodeToCheck) { isMatch ->
+            if (!isPlaying || !thread.isActive) return@checkConditionForNode
+            if (isMatch) {
+                thread.currentRepetition = 0
+                thread.currentNodeId = route.onSuccessGoToId
+                if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId} Шаг ${managerNode.id}: Менеджер совпало ${route.checkNodeId} -> ${thread.currentNodeId}")
+                scheduleNextExecution(thread, managerNode.delayAfterMs)
+            } else {
+                evaluateManagerRoutes(routes, index + 1, thread, managerNode)
+            }
+        }
+    }
+
     private fun executeThread(thread: ExecutionThread) {
         if (!isPlaying || !thread.isActive) return
 
@@ -441,6 +477,10 @@ class AutoClickService : AccessibilityService() {
                 } else if (node.triggerMode == 2 && node.ocrFullScreenClick) {
                     if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId} Шаг ${node.id}: OCR Клик")
                     performGestureForNodes(mutableListOf(node))
+                } else if (node.type == NodeType.MANAGER) {
+                    if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId} Шаг ${node.id}: Менеджер...")
+                    evaluateManagerRoutes(node.managerRoutes, 0, thread, node)
+                    return@checkConditionForNode
                 } else if (node.type == NodeType.MACRO && !node.macroProfileName.isNullOrEmpty()) {
                     if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId} Шаг ${node.id}: Запуск макроса ${node.macroProfileName} (Параллельно: ${node.macroRunParallel})")
                     val oldMaxId = if (nodes.isNotEmpty()) nodes.maxOf { it.id } else 0
@@ -857,7 +897,7 @@ class AutoClickService : AccessibilityService() {
                     } else {
                         val enhanced = enhanceBitmapForOcr(cropped)
                         debugBmp = enhanced
-                        val analyzer = getHuaweiAnalyzer()
+                        val analyzer = getHuaweiAnalyzer(node.targetLanguage)
                         val frame = com.huawei.hms.mlsdk.common.MLFrame.fromBitmap(enhanced)
                         val task = analyzer.asyncAnalyseFrame(frame)
                         val result = com.huawei.hmf.tasks.Tasks.await(task)
@@ -942,7 +982,7 @@ class AutoClickService : AccessibilityService() {
                         recognizedText = ""
                     } else {
                         val enhanced = enhanceBitmapForOcr(cropped)
-                        val analyzer = getHuaweiAnalyzer()
+                        val analyzer = getHuaweiAnalyzer(node.targetLanguage)
                         val frame = com.huawei.hms.mlsdk.common.MLFrame.fromBitmap(enhanced)
                         val task = analyzer.asyncAnalyseFrame(frame)
                         val result = com.huawei.hmf.tasks.Tasks.await(task)
@@ -1511,6 +1551,20 @@ class AutoClickService : AccessibilityService() {
         val prefs = getSharedPreferences("AutoClickerProfiles", android.content.Context.MODE_PRIVATE)
         prefs.edit().remove(name).apply()
         android.widget.Toast.makeText(this, "Сценарий '$name' удален", android.widget.Toast.LENGTH_SHORT).show()
+    }
+
+    fun autoSave() {
+        val prefs = getSharedPreferences("AutoClickerProfiles", android.content.Context.MODE_PRIVATE)
+        val obj = org.json.JSONObject()
+        val metrics = resources.displayMetrics
+        obj.put("screenWidth", metrics.widthPixels)
+        obj.put("screenHeight", metrics.heightPixels)
+        val arr = org.json.JSONArray()
+        for (node in nodes) {
+            arr.put(node.toJson())
+        }
+        obj.put("nodes", arr)
+        prefs.edit().putString("Автосохранение", obj.toString()).apply()
     }
 
     fun saveProfile(name: String) {

@@ -30,9 +30,11 @@ class MainActivity : Activity() {
     }
 
     private fun handleIntent(intent: Intent?) {
-        when (intent?.action) {
+        val action = intent?.action ?: return
+        intent.action = null // Clear action so we don't trigger it again on rotation
+        
+        when (action) {
             "ACTION_EXPORT_PROFILE" -> {
-                // Read from static variable to avoid TransactionTooLargeException
                 val name = intent.getStringExtra("profile_name") ?: "AutoClickerProfile"
                 val sfIntent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
                     addCategory(Intent.CATEGORY_OPENABLE)
@@ -52,27 +54,36 @@ class MainActivity : Activity() {
                 val data = pendingExportData
                 val title = intent.getStringExtra("profile_name") ?: "AutoClicker Profile"
                 try {
+                    val cachePath = java.io.File(cacheDir, "shared_profiles")
+                    cachePath.mkdirs()
+                    val newFile = java.io.File(cachePath, "${title.replace(" ", "_")}.json")
+                    newFile.writeText(data ?: "{}")
+                    
+                    val contentUri = androidx.core.content.FileProvider.getUriForFile(this, "com.example.autoclicker.fileprovider", newFile)
+                    
                     val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                        type = "text/plain"
-                        putExtra(Intent.EXTRA_TEXT, data)
+                        type = "application/json"
+                        putExtra(Intent.EXTRA_STREAM, contentUri)
                         putExtra(Intent.EXTRA_TITLE, title)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     }
                     startActivity(Intent.createChooser(sendIntent, "Поделиться сценарием"))
                 } catch (e: Exception) {
+                    e.printStackTrace()
                     android.widget.Toast.makeText(this, "Ошибка при отправке сценария", android.widget.Toast.LENGTH_LONG).show()
                 }
             }
             Intent.ACTION_VIEW -> {
                 intent.data?.let { uri ->
                     try {
-                        val content = contentResolver.openInputStream(uri)?.bufferedReader().use { it?.readText() }
-                        if (content != null) {
+                        val fileContent = contentResolver.openInputStream(uri)?.bufferedReader().use { it?.readText() }
+                        if (fileContent != null) {
                             val instance = AutoClickService.instance
                             if (instance != null) {
-                                instance.loadProfileFromJson(content, append = false)
+                                instance.loadProfileFromJson(fileContent, append = false)
                                 android.widget.Toast.makeText(this, "Профиль успешно загружен", android.widget.Toast.LENGTH_SHORT).show()
                             } else {
-                                pendingImportData = content
+                                pendingImportData = fileContent
                                 android.widget.Toast.makeText(this, "Включите службу Автокликера для импорта профиля", android.widget.Toast.LENGTH_LONG).show()
                             }
                         }

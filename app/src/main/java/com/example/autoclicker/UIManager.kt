@@ -69,24 +69,47 @@ class CrosshairView(context: Context, val node: TargetNode) : View(context) {
     }
 }
 
-class SwipeEndView(context: Context, val node: TargetNode) : View(context) {
+class SubMarkerView(context: Context, val node: TargetNode, val markerType: Int) : View(context) {
+    // 1 = Swipe, 2 = Color Compare
     private val density = context.resources.displayMetrics.density
     
     private val paint = Paint().apply {
         style = Paint.Style.STROKE
         isAntiAlias = true
-        color = Color.parseColor("#FF00FF") // Magenta
+        color = if (markerType == 1) Color.parseColor("#00BFFF") else Color.parseColor("#FF00FF") // Cyan for swipe, Magenta for color
+        strokeWidth = 2f * density * node.sizeScale
     }
-    
+    private val fillPaint = Paint().apply {
+        style = Paint.Style.FILL
+        isAntiAlias = true
+        color = paint.color
+        alpha = 80
+    }
+    private val textPaint = Paint().apply {
+        color = Color.WHITE
+        textSize = 10f * density * node.sizeScale
+        isAntiAlias = true
+        textAlign = Paint.Align.CENTER
+        setShadowLayer(2f, 1f, 1f, Color.BLACK)
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        paint.strokeWidth = 3f * density * node.sizeScale
         val cx = width / 2f
         val cy = height / 2f
-        val radius = 6f * density * node.sizeScale
+        
+        val radius = 8f * density * node.sizeScale
+        val innerRadius = 3f * density * node.sizeScale
+        val lineExt = 4f * density * node.sizeScale
+        
         canvas.drawCircle(cx, cy, radius, paint)
-        canvas.drawLine(cx - radius, cy, cx + radius, cy, paint)
-        canvas.drawLine(cx, cy - radius, cx, cy + radius, paint)
+        canvas.drawCircle(cx, cy, innerRadius, fillPaint)
+        
+        canvas.drawLine(cx, cy - radius - lineExt, cx, cy + radius + lineExt, paint)
+        canvas.drawLine(cx - radius - lineExt, cy, cx + radius + lineExt, cy, paint)
+        
+        val label = if (markerType == 1) "S${node.id}" else "C${node.id}"
+        canvas.drawText(label, cx + radius + lineExt, cy - radius, textPaint)
     }
 }
 
@@ -837,7 +860,7 @@ class UIManager(private val service: AutoClickService) {
         val addClickBtn = Button(service).apply {
             text = "+ ДОБАВИТЬ МЕТКУ (Клик/Свайп)"
             setOnClickListener { addNode(NodeType.CLICK) }
-            visibility = if (appMode == AppMode.SINGLE && service.nodes.isNotEmpty()) View.GONE else View.VISIBLE
+            visibility = View.VISIBLE
         }
 
         // color trigger removed
@@ -1065,7 +1088,6 @@ class UIManager(private val service: AutoClickService) {
         layout.addView(TextView(service).apply { text = "Режим работы кликера"; setTextColor(Color.WHITE); setScaledTextSize(16f); setPadding(0, 0, 0, 20) })
 
         val modes = listOf(
-            AppMode.SINGLE to "Одиночный (1 клик)",
             AppMode.SEQUENTIAL to "Последовательный (Цепочка)",
             AppMode.ADVANCED to "Продвинутый (Триггеры, Логика)",
             AppMode.RECORD to "Запись (Клик по экрану ставит метку)"
@@ -1606,13 +1628,14 @@ class UIManager(private val service: AutoClickService) {
             setScaledTextSize(16f)
         })
         val typeSpinner = android.widget.Spinner(service).apply {
-            val items = arrayOf("КЛИК", "ТРИГГЕР", "МАКРОС")
+            val items = arrayOf("КЛИК", "ТРИГГЕР", "МАКРОС", "МЕНЕДЖЕР")
             val adapter = android.widget.ArrayAdapter(service, android.R.layout.simple_spinner_dropdown_item, items)
             this.adapter = adapter
             setSelection(when(node.type) {
                 NodeType.CLICK -> 0
                 NodeType.CHECK_COLOR -> 1
                 NodeType.MACRO -> 2
+                NodeType.MANAGER -> 3
             })
             visibility = if (appMode == AppMode.ADVANCED) View.VISIBLE else View.GONE
             onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
@@ -1621,10 +1644,13 @@ class UIManager(private val service: AutoClickService) {
                         0 -> NodeType.CLICK
                         1 -> NodeType.CHECK_COLOR
                         2 -> NodeType.MACRO
+                        3 -> NodeType.MANAGER
                         else -> NodeType.CLICK
                     }
                     if (node.type != newType) {
                         node.type = newType
+                        node.crosshairColor = if (node.type == NodeType.CLICK) Color.RED else if (node.type == NodeType.MANAGER) Color.parseColor("#9C27B0") else Color.BLUE
+                        nodeViews[node.id]?.invalidate()
                         showEditNodeMenu(node)
                         nodeViews[node.id]?.invalidate()
                     }
@@ -1635,7 +1661,7 @@ class UIManager(private val service: AutoClickService) {
         headerLayout.addView(typeSpinner)
         
         if (appMode == AppMode.ADVANCED) {
-            if (node.type == NodeType.CHECK_COLOR || node.type == NodeType.MACRO) {
+            if (node.type == NodeType.CHECK_COLOR || node.type == NodeType.MACRO || node.type == NodeType.MANAGER) {
                 val skipSwitch = android.widget.Switch(service).apply {
                     text = "Функция (Пропуск в очереди)"
                     setTextColor(Color.CYAN)
@@ -1810,7 +1836,7 @@ class UIManager(private val service: AutoClickService) {
         }
 
         val hasTimingChanges = node.clickDurationMs != 50L || node.delayAfterMs != 300L || node.repetitions != 1
-        addSection("Тайминги", hasTimingChanges) { body ->
+        val timingsSection = addSection("Тайминги", hasTimingChanges) { body ->
             body.addView(clickDurRow)
             body.addView(delayRow)
             body.addView(tvRepetitions)
@@ -1855,6 +1881,127 @@ class UIManager(private val service: AutoClickService) {
             }
         }
 
+        // --- MANAGER SECTION ---
+        var managerSection: View? = null
+        if (node.type == NodeType.MANAGER) {
+            managerSection = addSection("Настройки Менеджера", true) { body ->
+                val desc = TextView(service).apply {
+                    text = "Менеджер по очереди проверяет Триггеры. Если Триггер срабатывает, происходит переход к указанной Метке."
+                    setTextColor(Color.LTGRAY)
+                    setScaledTextSize(12f)
+                    setPadding(0, 0, 0, 10)
+                }
+                body.addView(desc)
+                
+                val listContainer = LinearLayout(service).apply { orientation = LinearLayout.VERTICAL }
+                body.addView(listContainer)
+                
+                fun renderRoutes() {
+                    listContainer.removeAllViews()
+                    for ((index, route) in node.managerRoutes.withIndex()) {
+                        val row = LinearLayout(service).apply {
+                            orientation = LinearLayout.HORIZONTAL
+                            gravity = Gravity.CENTER_VERTICAL
+                            setPadding(0, 5, 0, 5)
+                            background = android.graphics.drawable.GradientDrawable().apply {
+                                setColor(Color.parseColor("#333333"))
+                                setCornerRadius(8f)
+                            }
+                        }
+                        
+                        val txt1 = TextView(service).apply { text = "Триггер № "; setTextColor(Color.WHITE) }
+                        val checkEdit = EditText(service).apply {
+                            inputType = InputType.TYPE_CLASS_NUMBER
+                            setText(if(route.checkNodeId != -1) route.checkNodeId.toString() else "")
+                            setTextColor(Color.WHITE)
+                            layoutParams = LinearLayout.LayoutParams(dpToPx(40), WindowManager.LayoutParams.WRAP_CONTENT)
+                            addTextChangedListener(object: android.text.TextWatcher {
+                                override fun afterTextChanged(s: android.text.Editable?) {
+                                    s?.toString()?.toIntOrNull()?.let { route.checkNodeId = it }
+                                }
+                                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+                            })
+                        }
+                        val txt2 = TextView(service).apply { text = " ➔ Метка № "; setTextColor(Color.WHITE) }
+                        val goEdit = EditText(service).apply {
+                            inputType = InputType.TYPE_CLASS_NUMBER
+                            setText(if(route.onSuccessGoToId != -1) route.onSuccessGoToId.toString() else "")
+                            setTextColor(Color.WHITE)
+                            layoutParams = LinearLayout.LayoutParams(dpToPx(40), WindowManager.LayoutParams.WRAP_CONTENT)
+                            addTextChangedListener(object: android.text.TextWatcher {
+                                override fun afterTextChanged(s: android.text.Editable?) {
+                                    s?.toString()?.toIntOrNull()?.let { route.onSuccessGoToId = it }
+                                }
+                                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+                            })
+                        }
+                        val delBtn = Button(service).apply {
+                            text = "X"
+                            setTextColor(Color.RED)
+                            setBackgroundColor(Color.TRANSPARENT)
+                            setPadding(5, 5, 5, 5)
+                            layoutParams = LinearLayout.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT)
+                            setOnClickListener {
+                                val mut = node.managerRoutes.toMutableList()
+                                mut.removeAt(index)
+                                node.managerRoutes = mut
+                                renderRoutes()
+                            }
+                        }
+                        
+                        row.addView(txt1)
+                        row.addView(checkEdit)
+                        row.addView(txt2)
+                        row.addView(goEdit)
+                        row.addView(delBtn)
+                        listContainer.addView(row)
+                    }
+                    
+                    val addBtn = Button(service).apply {
+                        text = "+ ДОБАВИТЬ УСЛОВИЕ"
+                        setTextColor(Color.parseColor("#4CAF50"))
+                        setBackgroundColor(Color.TRANSPARENT)
+                        setOnClickListener {
+                            val mut = node.managerRoutes.toMutableList()
+                            mut.add(ManagerRoute(-1, -1))
+                            node.managerRoutes = mut
+                            renderRoutes()
+                        }
+                    }
+                    listContainer.addView(addBtn)
+                }
+                
+                renderRoutes()
+                
+                val fallbackLayout = LinearLayout(service).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    setPadding(0, 20, 0, 0)
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+                fallbackLayout.addView(TextView(service).apply { text = "Если ничего не совпало, идти к №: "; setTextColor(Color.WHITE) })
+                val fallbackEdit = EditText(service).apply {
+                    inputType = InputType.TYPE_CLASS_NUMBER
+                    setText(node.nextNodeIdOnFail?.toString() ?: "")
+                    hint = "(Стоп)"
+                    setHintTextColor(Color.LTGRAY)
+                    setTextColor(Color.WHITE)
+                    layoutParams = LinearLayout.LayoutParams(dpToPx(60), WindowManager.LayoutParams.WRAP_CONTENT)
+                    addTextChangedListener(object: android.text.TextWatcher {
+                        override fun afterTextChanged(s: android.text.Editable?) {
+                            val v = s?.toString()?.toIntOrNull()
+                            if (v != null) node.nextNodeIdOnFail = v else node.nextNodeIdOnFail = null
+                        }
+                        override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                        override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+                    })
+                }
+                fallbackLayout.addView(fallbackEdit)
+                body.addView(fallbackLayout)
+            }
+        }
+        
         val hasAntiDetect = node.randomizeDelayMs > 0 || node.randomizeRadius > 0
         val antiDetectSection = addSection("Анти-Детект", hasAntiDetect) { body ->
             body.addView(randomDelayRow)
@@ -2398,7 +2545,7 @@ class UIManager(private val service: AutoClickService) {
             cycleLimitLayout.visibility = View.GONE
         }
         
-        if (appMode == AppMode.SINGLE) {
+        if (false) {
             colorPreview.visibility = View.GONE
             capBtn.visibility = View.GONE
             capImgBtn.visibility = View.GONE
@@ -2416,7 +2563,7 @@ class UIManager(private val service: AutoClickService) {
         }
 
         // Hide entire logic section if nothing is visible inside
-        if (appMode == AppMode.SINGLE || (appMode == AppMode.SEQUENTIAL && node.type == NodeType.CLICK)) {
+        if (appMode == AppMode.SEQUENTIAL && node.type == NodeType.CLICK) {
             logicSection.visibility = View.GONE
             routingSection.visibility = View.GONE
         }
@@ -2452,17 +2599,51 @@ class UIManager(private val service: AutoClickService) {
         
         val (swipeDurRow, getSwipeDurRowMs) = createTimeInputRow("Задержка:", node.swipeDurationMs)
         
-        val swipeDeltaLayout = LinearLayout(service).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 5, 0, 0) }
-        swipeDeltaLayout.addView(TextView(service).apply { text = "Вести к Триггеру №: "; setTextColor(Color.WHITE) })
+        val swipeDeltaLayout = LinearLayout(service).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 10, 0, 0) }
+        val modeSpinnerLayout = LinearLayout(service).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        modeSpinnerLayout.addView(TextView(service).apply { text = "Режим свайпа: "; setTextColor(Color.WHITE) })
+        val modeSpinner = Spinner(service).apply {
+            adapter = android.widget.ArrayAdapter(service, android.R.layout.simple_spinner_item, arrayOf("Вектор (Суб-метка)", "К метке (ID)", "Ломаная линия (Жест)"))
+            setSelection(if (node.swipePathPoints.isNotEmpty()) 2 else if (node.swipeTargetNodeId != null) 1 else 0)
+        }
+        modeSpinnerLayout.addView(modeSpinner)
+        swipeDeltaLayout.addView(modeSpinnerLayout)
+
+        val swipeTargetEditLayout = LinearLayout(service).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, 5, 0, 0); gravity = Gravity.CENTER_VERTICAL }
+        swipeTargetEditLayout.addView(TextView(service).apply { text = "ID цели: "; setTextColor(Color.WHITE) })
         val swipeTargetEdit = EditText(service).apply {
             inputType = InputType.TYPE_CLASS_NUMBER
             setText(node.swipeTargetNodeId?.toString() ?: "")
-            hint = "(Нет)"
+            hint = "(Введите ID)"
             setHintTextColor(Color.parseColor("#AAAAAA"))
             setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT)
+            layoutParams = LinearLayout.LayoutParams(dpToPx(100), WindowManager.LayoutParams.WRAP_CONTENT)
         }
-        swipeDeltaLayout.addView(swipeTargetEdit)
+        swipeTargetEditLayout.addView(swipeTargetEdit)
+        swipeDeltaLayout.addView(swipeTargetEditLayout)
+        
+        modeSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(p0: android.widget.AdapterView<*>?, p1: View?, pos: Int, p3: Long) {
+                swipeTargetEditLayout.visibility = if (pos == 1) View.VISIBLE else View.GONE
+                
+                if (pos == 0) {
+                    // Vector
+                    node.swipeTargetNodeId = null
+                    node.swipePathPoints = emptyList()
+                    if (node.isSwipe) createSwipeEndMarker(node)
+                } else if (pos == 1) {
+                    // To ID
+                    removeSwipeEndMarker(node.id)
+                    node.swipePathPoints = emptyList()
+                } else if (pos == 2) {
+                    // Gesture (don't clear points if we just switched to view it)
+                    removeSwipeEndMarker(node.id)
+                    node.swipeTargetNodeId = null
+                }
+                invalidateLines()
+            }
+            override fun onNothingSelected(p0: android.widget.AdapterView<*>?) {}
+        }
 
         
         val hasSwipeChanges = node.syncWithNodeIds.isNotEmpty() || node.isSwipe || node.swipeTargetNodeId != null || node.swipeDurationMs != 500L
@@ -2473,14 +2654,22 @@ class UIManager(private val service: AutoClickService) {
             body.addView(swipeDeltaLayout)
         }
 
-        if (appMode == AppMode.SINGLE) {
+        if (false) {
             syncSwipeSection.visibility = View.GONE
         }
-            if (node.type == NodeType.CHECK_COLOR || node.type == NodeType.MACRO) {
+            if (node.type == NodeType.CHECK_COLOR || node.type == NodeType.MACRO || node.type == NodeType.MANAGER) {
                 swipeLayout.visibility = View.GONE
                 swipeDurRow.visibility = View.GONE
                 swipeDeltaLayout.visibility = View.GONE
                 clickDurRow.visibility = View.GONE
+            }
+            if (node.type == NodeType.MANAGER) {
+                timingsSection.visibility = View.GONE
+                logicSection.visibility = View.GONE
+                routingSection.visibility = View.GONE
+                macroSection.visibility = View.GONE
+                antiDetectSection.visibility = View.GONE
+                syncSwipeSection.visibility = View.GONE
             }
 
         // --- SAVE BUTTON ---
@@ -2547,31 +2736,17 @@ class UIManager(private val service: AutoClickService) {
             node.colorCompareY = node.y + dpToPx(30)
         }
 
-        val container = FrameLayout(service)
-        val diamond = android.view.View(service).apply {
-            background = android.graphics.drawable.GradientDrawable().apply {
-                shape = android.graphics.drawable.GradientDrawable.RECTANGLE
-                setColor(Color.MAGENTA)
-                setStroke(dpToPx(2), Color.WHITE)
-            }
-            rotation = 45f
-            alpha = 0.8f
-        }
-        val text = TextView(service).apply {
-            text = "c"
-            setTextColor(Color.WHITE)
-            textSize = 10f * uiScale
-            gravity = Gravity.CENTER
-            setShadowLayer(2f, 1f, 1f, Color.BLACK)
-        }
+        val container = SubMarkerView(service, node, 2)
 
-        container.addView(diamond, FrameLayout.LayoutParams(dpToPx(20), dpToPx(20)).apply { gravity = Gravity.CENTER })
-        container.addView(text, FrameLayout.LayoutParams(dpToPx(24), dpToPx(24)).apply { gravity = Gravity.CENTER })
+        var flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+        if (service.isPlaying || service.isRecording) {
+            flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        }
 
         val params = WindowManager.LayoutParams(
             dpToPx(40), dpToPx(40),
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            flags,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -2579,35 +2754,9 @@ class UIManager(private val service: AutoClickService) {
             y = node.colorCompareY!! - dpToPx(20)
         }
 
-        var initialX = 0
-        var initialY = 0
-        var initialTouchX = 0f
-        var initialTouchY = 0f
-        container.setOnTouchListener { _, event ->
-            when (event.action) {
-                android.view.MotionEvent.ACTION_DOWN -> {
-                    initialX = params.x
-                    initialY = params.y
-                    initialTouchX = event.rawX
-                    initialTouchY = event.rawY
-                    true
-                }
-                android.view.MotionEvent.ACTION_MOVE -> {
-                    params.x = initialX + (event.rawX - initialTouchX).toInt()
-                    params.y = initialY + (event.rawY - initialTouchY).toInt()
-                    windowManager.updateViewLayout(container, params)
-                    node.colorCompareX = params.x + dpToPx(20)
-                    node.colorCompareY = params.y + dpToPx(20)
-                    invalidateLines()
-                    true
-                }
-                else -> false
-            }
-        }
+        container.visibility = if (node.isVisible) View.VISIBLE else View.GONE
+        setupColorCompareTouchListener(container, params, node)
 
-        if (service.isPlaying || service.isRecording) {
-            container.visibility = View.GONE
-        }
         windowManager.addView(container, params)
         colorCompareViews[node.id] = container
         colorCompareParams[node.id] = params
@@ -2753,7 +2902,7 @@ class UIManager(private val service: AutoClickService) {
             node.swipeEndY = node.y + dpToPx(100)
         }
         
-        val swipeEndView = SwipeEndView(service, node)
+        val swipeEndView = SubMarkerView(service, node, 1)
         var flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
         if (service.isPlaying || service.isRecording) {
             flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
@@ -2936,13 +3085,28 @@ class UIManager(private val service: AutoClickService) {
                         }
 
                         // Swipe line
-                        if (node.isSwipe && node.swipeEndX != null && node.swipeEndY != null) {
+                        if (node.isSwipe) {
                             val params = nodeParams[node.id]
                             if (params != null) {
                                 val startX = params.x + dpToPx(30).toFloat()
                                 val startY = params.y + dpToPx(30).toFloat()
-                                val endX = node.swipeEndX!!
-                                val endY = node.swipeEndY!!
+                                
+                                var finalEndX = node.swipeEndX.toFloat()
+                                var finalEndY = node.swipeEndY.toFloat()
+                                
+                                if (node.swipeTargetNodeId != null) {
+                                    val tNode = service.nodes.find { it.id == node.swipeTargetNodeId }
+                                    if (tNode != null) {
+                                        val tParams = nodeParams[tNode.id]
+                                        if (tParams != null) {
+                                            finalEndX = tParams.x + dpToPx(30).toFloat()
+                                            finalEndY = tParams.y + dpToPx(30).toFloat()
+                                        }
+                                    }
+                                }
+                                
+                                val endX = finalEndX
+                                val endY = finalEndY
                                 
                                 var pDX = endX.toFloat() - startX.toFloat()
                                 var pDY = endY.toFloat() - startY.toFloat()
@@ -2974,7 +3138,7 @@ class UIManager(private val service: AutoClickService) {
                                 val p2y = endY - arrowLen * Math.sin(angle + Math.PI / 6)
                                 
                                 val path = android.graphics.Path().apply {
-                                    moveTo(endX.toFloat(), endY.toFloat())
+                                    moveTo(endX, endY)
                                     lineTo(p1x.toFloat(), p1y.toFloat())
                                     lineTo(p2x.toFloat(), p2y.toFloat())
                                     close()
@@ -3052,16 +3216,17 @@ class UIManager(private val service: AutoClickService) {
     }
 
     fun addNode(type: NodeType, startX: Int? = null, startY: Int? = null) {
-        if (appMode == AppMode.SINGLE && service.nodes.isNotEmpty()) {
+        if (false) {
             android.widget.Toast.makeText(service, "В Одиночном режиме доступна только одна метка!", android.widget.Toast.LENGTH_SHORT).show()
             return
         }
         val id = nodeCounter++
         val node = TargetNode(id = id, type = type).apply {
-            crosshairColor = if (type == NodeType.CLICK) Color.RED else Color.BLUE
+            crosshairColor = if (type == NodeType.CLICK) Color.RED else if (type == NodeType.MANAGER) Color.parseColor("#9C27B0") else Color.BLUE
             numberColor = if (type == NodeType.CLICK) Color.WHITE else Color.YELLOW
         }
         service.nodes.add(node)
+        service.autoSave()
         
         val crosshair = CrosshairView(service, node)
         var flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
