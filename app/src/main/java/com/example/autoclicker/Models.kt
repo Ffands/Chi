@@ -78,8 +78,10 @@ data class TargetNode(
     var isSmartOcr: Boolean = false,
     var ocrOperator: String = ">=",
     var ocrTargetValue: Double = 0.0,
+    var ocrCompareToNodeId: Int? = null,
     var ocrCustomSuffixes: String = "k:1000,m:1000000,b:1000000000,к:1000,м:1000000,б:1000000000"
 ) {
+    @Transient var lastRecognizedValue: Double? = null
     @Transient var currentCheckCycle: Int = 0
     @Transient var currentRepetition: Int = 0
     @Transient var cachedTargetBitmap: android.graphics.Bitmap? = null
@@ -147,6 +149,7 @@ data class TargetNode(
         if (isSmartOcr) obj.put("isSmartOcr", isSmartOcr)
         if (ocrOperator != ">=") obj.put("ocrOperator", ocrOperator)
         if (ocrTargetValue != 0.0) obj.put("ocrTargetValue", ocrTargetValue)
+        if (ocrCompareToNodeId != null) obj.put("ocrCompareToNodeId", ocrCompareToNodeId)
         if (ocrCustomSuffixes != "k:1000,m:1000000,b:1000000000,к:1000,м:1000000,б:1000000000") obj.put("ocrCustomSuffixes", ocrCustomSuffixes)
         if (swipePathPoints.isNotEmpty()) {
             val pointArr = org.json.JSONArray()
@@ -244,6 +247,7 @@ data class TargetNode(
                 isSmartOcr = obj.optBoolean("isSmartOcr", false),
                 ocrOperator = obj.optString("ocrOperator", ">="),
                 ocrTargetValue = obj.optDouble("ocrTargetValue", 0.0),
+                ocrCompareToNodeId = if (obj.has("ocrCompareToNodeId")) obj.getInt("ocrCompareToNodeId") else null,
                 ocrCustomSuffixes = obj.optString("ocrCustomSuffixes", "k:1000,m:1000000,b:1000000000,к:1000,м:1000000,б:1000000000")
             )
         }

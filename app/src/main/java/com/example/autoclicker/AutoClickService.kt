@@ -125,6 +125,7 @@ class AutoClickService : AccessibilityService() {
             field = value
             if (!value) {
                 activeThreads.clear()
+        if (::uiManager.isInitialized) uiManager.removeAllPhantomNodes()
                 updateHighlight()
                 gestureQueue.clear()
                 try {
@@ -141,6 +142,13 @@ class AutoClickService : AccessibilityService() {
     var allowExtremeSpeed = false
     var enableMultitouch = false
     
+    data class ExecutionFrame(
+        val scriptNodes: List<TargetNode>?,
+        val returnNodeId: Int?,
+        val repetition: Int,
+        val phantomId: Int?
+    )
+
     data class ExecutionThread(
         val threadId: Int,
         var currentNodeId: Int?,
@@ -148,9 +156,11 @@ class AutoClickService : AccessibilityService() {
         var currentRepetition: Int = 0,
         var currentCycle: Int = 0,
         var isWaiting: Boolean = false,
-        var isActive: Boolean = true
+        var isActive: Boolean = true,
+        var currentScriptNodes: List<TargetNode>? = null,
+        var phantomId: Int? = null
     ) {
-        val returnStack = java.util.Stack<Int>()
+        val callStack = java.util.Stack<ExecutionFrame>()
     }
     val activeThreads = java.util.concurrent.CopyOnWriteArrayList<ExecutionThread>()
     
@@ -294,7 +304,7 @@ class AutoClickService : AccessibilityService() {
             showRecordOverlay()
         } else {
             android.widget.Toast.makeText(this, "Запись остановлена.", android.widget.Toast.LENGTH_SHORT).show()
-            uiManager.setNodesTouchable(true)
+            restoreTouchabilitySafe()
             hideRecordOverlay()
         }
         uiManager.updateMenu()
@@ -309,14 +319,16 @@ class AutoClickService : AccessibilityService() {
 
         if (isPlaying) {
             isPlaying = false
+            gestureQueue.clear()
             if (::uiManager.isInitialized) uiManager.logDebug("--- СТОП ---")
-            uiManager.setNodesTouchable(true)
+            restoreTouchabilitySafe()
         } else {
             if (nodes.isEmpty()) return
             isPlaying = true
             currentCycle = 0
             playStartTimeMs = System.currentTimeMillis()
             activeThreads.clear()
+        if (::uiManager.isInitialized) uiManager.removeAllPhantomNodes()
             
             // Check if user set multiple start points by looking at all unlinked nodes, or just the first one
             // We can spawn threads for all nodes that are NOT the target of any other node, unless there's a loop.
@@ -369,24 +381,43 @@ class AutoClickService : AccessibilityService() {
         uiManager.recreateFloatingControlBar()
     }
 
+    private fun parseProfileNodes(profileName: String): List<TargetNode>? {
+        val prefs = getSharedPreferences("AutoClickerProfiles", android.content.Context.MODE_PRIVATE)
+        val json = prefs.getString(profileName, null) ?: return null
+        try {
+            val jsonObject = org.json.JSONObject(json)
+            val nodesArray = jsonObject.getJSONArray("nodes")
+            val parsedNodes = mutableListOf<TargetNode>()
+            for (i in 0 until nodesArray.length()) {
+                parsedNodes.add(TargetNode.fromJson(nodesArray.getJSONObject(i)))
+            }
+            return parsedNodes
+        } catch (e: Exception) {
+            e.printStackTrace()
+            return null
+        }
+    }
+
     private fun evaluateManagerRoutes(routes: List<ManagerRoute>, index: Int, thread: ExecutionThread, managerNode: TargetNode) {
         if (!isPlaying || !thread.isActive) return
         if (index >= routes.size) {
             thread.currentRepetition = 0
-            thread.currentNodeId = managerNode.nextNodeIdOnFail ?: getNextNodeLinear(managerNode.id)
+            val currentNodesList = thread.currentScriptNodes ?: this.nodes
+            thread.currentNodeId = managerNode.nextNodeIdOnFail ?: getNextNodeLinear(managerNode.id, currentNodesList)
             if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId} Шаг ${managerNode.id}: Менеджер -> ${thread.currentNodeId} (По умолчанию)")
             scheduleNextExecution(thread, managerNode.delayAfterMs)
             return
         }
         
         val route = routes[index]
-        val nodeToCheck = nodes.find { it.id == route.checkNodeId }
+        val currentNodesList = thread.currentScriptNodes ?: this.nodes
+        val nodeToCheck = currentNodesList.find { it.id == route.checkNodeId }
         if (nodeToCheck == null || !nodeHasCondition(nodeToCheck)) {
             evaluateManagerRoutes(routes, index + 1, thread, managerNode)
             return
         }
         
-        checkConditionForNode(nodeToCheck) { isMatch ->
+        checkConditionForNode(nodeToCheck, thread.currentScriptNodes) { isMatch ->
             if (!isPlaying || !thread.isActive) return@checkConditionForNode
             if (isMatch) {
                 thread.currentRepetition = 0
@@ -407,8 +438,11 @@ class AutoClickService : AccessibilityService() {
         if (!isPlaying || !thread.isActive) return
 
         if (thread.currentNodeId == -1) {
-            if (thread.returnStack.isNotEmpty()) {
-                thread.currentNodeId = thread.returnStack.pop()
+            if (thread.callStack.isNotEmpty()) {
+                val frame = thread.callStack.pop()
+                thread.currentNodeId = frame.returnNodeId
+                thread.currentScriptNodes = frame.scriptNodes
+                thread.currentRepetition = frame.repetition
                 if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId}: Возврат из макроса на шаг ${thread.currentNodeId}")
                 scheduleNextExecution(thread, 0L)
                 return
@@ -423,24 +457,29 @@ class AutoClickService : AccessibilityService() {
             val elapsed = System.currentTimeMillis() - playStartTimeMs
             if (elapsed >= maxPlayDurationMs!!) {
                 isPlaying = false
+                gestureQueue.clear()
                 if (::uiManager.isInitialized) uiManager.logDebug("СТОП: Лимит времени истек")
-                uiManager.setNodesTouchable(true)
+                restoreTouchabilitySafe()
                 uiManager.updateMenu()
                 return
             }
         }
 
-        val node = nodes.find { it.id == thread.currentNodeId }
+        val currentNodes = thread.currentScriptNodes ?: this.nodes
+        val node = currentNodes.find { it.id == thread.currentNodeId }
         
         if (node == null) {
-            if (thread.returnStack.isNotEmpty()) {
-                thread.currentNodeId = thread.returnStack.pop()
+            if (thread.callStack.isNotEmpty()) {
+                val frame = thread.callStack.pop()
+                thread.currentNodeId = frame.returnNodeId
+                thread.currentScriptNodes = frame.scriptNodes
+                thread.currentRepetition = frame.repetition
                 if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId}: Возврат из макроса на шаг ${thread.currentNodeId}")
                 scheduleNextExecution(thread, 0L)
                 return
             }
             
-            thread.currentNodeId = nodes.firstOrNull { !it.skipSequentialExecution }?.id
+            thread.currentNodeId = currentNodes.firstOrNull { !it.skipSequentialExecution }?.id
             
             if (thread.currentNodeId != null) {
                 thread.currentCycle++
@@ -463,8 +502,15 @@ class AutoClickService : AccessibilityService() {
             uiManager.updateNodeScreenPosition(node)
         }
 
-        checkConditionForNode(node) { isMatch ->
+        checkConditionForNode(node, currentNodes) { isMatch ->
             if (!isPlaying || !thread.isActive) return@checkConditionForNode
+            
+            val currentNodesList = thread.currentScriptNodes ?: this.nodes
+            if (currentNodesList.find { it.id == node.id } == null) {
+                thread.isActive = false
+                checkAllThreadsStopped()
+                return@checkConditionForNode
+            }
             
             if (isMatch) {
                 thread.currentCheckCycle = 0
@@ -475,7 +521,8 @@ class AutoClickService : AccessibilityService() {
                         for (idStr in idsStr) {
                             val id = idStr.trim().toIntOrNull()
                             if (id != null) {
-                                val syncNode = nodes.find { it.id == id }
+                                val currentNodesList = thread.currentScriptNodes ?: this.nodes
+                                val syncNode = currentNodesList.find { it.id == id }
                                 if (syncNode != null && syncNode.type == NodeType.CLICK) {
                                     activeNodes.add(syncNode)
                                 }
@@ -483,7 +530,7 @@ class AutoClickService : AccessibilityService() {
                         }
                     }
                     if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId} Шаг ${node.id}: ${if (node.isSwipe) "Свайп" else "Клик"}")
-                    performGestureForNodes(activeNodes)
+                    performGestureForNodes(activeNodes, thread.currentScriptNodes)
                 } else if (node.triggerMode == 2 && node.ocrFullScreenClick) {
                     if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId} Шаг ${node.id}: OCR Клик выполнен")
                 } else if (node.type == NodeType.MANAGER) {
@@ -491,37 +538,44 @@ class AutoClickService : AccessibilityService() {
                     evaluateManagerRoutes(node.managerRoutes, 0, thread, node)
                     return@checkConditionForNode
                 } else if (node.type == NodeType.MACRO && !node.macroProfileName.isNullOrEmpty()) {
-                    if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId} Шаг ${node.id}: Запуск макроса ${node.macroProfileName} (Параллельно: ${node.macroRunParallel})")
-                    val oldMaxId = if (nodes.isNotEmpty()) nodes.maxOf { it.id } else 0
-                    val offset = oldMaxId + 1
+                    if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId} Шаг ${node.id}: Запуск блока команд ${node.macroProfileName} (Параллельно: ${node.macroRunParallel})")
+                    val currentNodesList = thread.currentScriptNodes ?: this.nodes
+                    val macroNodes = parseProfileNodes(node.macroProfileName!!)
                     
-                    android.os.Handler(android.os.Looper.getMainLooper()).post {
-                        loadProfile(node.macroProfileName!!, append = true)
-                        
-                        if (node.macroRunParallel) {
-                            val newThread = ExecutionThread(
-                                threadId = activeThreads.size + 1,
-                                currentNodeId = offset
-                            )
-                            activeThreads.add(newThread)
-                            executeThread(newThread)
-                            
-                            thread.currentRepetition = 0
-                            thread.currentNodeId = node.nextNodeIdOnSuccess ?: getNextNodeLinear(node.id)
-                            scheduleNextExecution(thread, node.delayAfterMs)
-                        } else {
-                            val nextId = node.nextNodeIdOnSuccess ?: getNextNodeLinear(node.id)
-                            if (nextId != -1) {
-                                thread.returnStack.push(nextId)
-                            }
-                            thread.currentRepetition = 0
-                            thread.currentNodeId = offset
-                            scheduleNextExecution(thread, node.delayAfterMs)
-                        }
-                        
-                        uiManager.recreateFloatingControlBar()
+                    if (macroNodes.isNullOrEmpty()) {
+                        if (::uiManager.isInitialized) uiManager.logDebug("Ошибка: Не удалось загрузить блок команд ${node.macroProfileName}")
+                        thread.currentRepetition = 0
+                        thread.currentNodeId = node.nextNodeIdOnSuccess ?: getNextNodeLinear(node.id, currentNodesList)
+                        scheduleNextExecution(thread, node.delayAfterMs)
+                        return@checkConditionForNode
                     }
-                    return@checkConditionForNode // Wait for the async load
+                    
+                    if (node.macroRunParallel) {
+                        val pId = if (::uiManager.isInitialized) uiManager.showPhantomNodes(macroNodes) else null
+                        val newThread = ExecutionThread(
+                            threadId = activeThreads.size + 1,
+                            currentNodeId = macroNodes.firstOrNull()?.id,
+                            currentScriptNodes = macroNodes,
+                            phantomId = pId
+                        )
+                        activeThreads.add(newThread)
+                        executeThread(newThread)
+                        
+                        thread.currentRepetition = 0
+                        thread.currentNodeId = node.nextNodeIdOnSuccess ?: getNextNodeLinear(node.id, currentNodesList)
+                        scheduleNextExecution(thread, node.delayAfterMs)
+                    } else {
+                        val nextId = node.nextNodeIdOnSuccess ?: getNextNodeLinear(node.id, currentNodesList)
+                        val pId = if (::uiManager.isInitialized) uiManager.showPhantomNodes(macroNodes) else null
+                        thread.callStack.push(ExecutionFrame(thread.currentScriptNodes, nextId, thread.currentRepetition, thread.phantomId))
+                        thread.phantomId = pId
+                        
+                        thread.currentScriptNodes = macroNodes
+                        thread.currentRepetition = 0
+                        thread.currentNodeId = macroNodes.firstOrNull()?.id
+                        scheduleNextExecution(thread, node.delayAfterMs)
+                    }
+                    return@checkConditionForNode
                 } else {
                     if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId} Шаг ${node.id}: Условие сработало")
                 }
@@ -531,7 +585,7 @@ class AutoClickService : AccessibilityService() {
                     thread.currentNodeId = node.id
                 } else {
                     thread.currentRepetition = 0
-                    thread.currentNodeId = node.nextNodeIdOnSuccess ?: getNextNodeLinear(node.id)
+                    thread.currentNodeId = node.nextNodeIdOnSuccess ?: getNextNodeLinear(node.id, thread.currentScriptNodes ?: this.nodes)
                 }
             } else {
                 if (node.maxCheckCycles != null && node.maxCheckCycles!! > 0) {
@@ -540,7 +594,7 @@ class AutoClickService : AccessibilityService() {
                     if (thread.currentCheckCycle >= node.maxCheckCycles!!) {
                         thread.currentCheckCycle = 0
                         thread.currentRepetition = 0
-                        thread.currentNodeId = node.nextNodeIdOnFail ?: getNextNodeLinear(node.id)
+                        thread.currentNodeId = node.nextNodeIdOnFail ?: getNextNodeLinear(node.id, thread.currentScriptNodes ?: this.nodes)
                     } else {
                         thread.currentNodeId = node.id
                     }
@@ -566,10 +620,21 @@ class AutoClickService : AccessibilityService() {
         }
     }
 
+    private fun restoreTouchabilitySafe() {
+        if (isDispatchingGesture || isDispatchingRecordGesture) {
+            handler.postDelayed({ restoreTouchabilitySafe() }, 100)
+        } else {
+            if (::uiManager.isInitialized) {
+                uiManager.setNodesTouchable(true)
+            }
+        }
+    }
+
     private fun checkAllThreadsStopped() {
         if (activeThreads.all { !it.isActive }) {
             isPlaying = false
-            uiManager.setNodesTouchable(true)
+            gestureQueue.clear()
+            restoreTouchabilitySafe()
             uiManager.updateMenu()
         }
     }
@@ -591,7 +656,7 @@ class AutoClickService : AccessibilityService() {
         return null // all nodes skipped
     }
 
-    private fun performGestureForNodes(activeNodes: List<TargetNode>) {
+    private fun performGestureForNodes(activeNodes: List<TargetNode>, contextNodes: List<TargetNode>? = null) {
         if (enableMultitouch) {
             val builder = GestureDescription.Builder()
             for (node in activeNodes) {
@@ -609,7 +674,7 @@ class AutoClickService : AccessibilityService() {
                     var eX = node.swipeEndX.toFloat()
                     var eY = node.swipeEndY.toFloat()
                     if (node.swipeTargetNodeId != null) {
-                        val tgtNode = nodes.find { it.id == node.swipeTargetNodeId }
+                        val tgtNode = (contextNodes ?: nodes).find { it.id == node.swipeTargetNodeId }
                         if (tgtNode != null) {
                             try {
                                 uiManager.updateNodeScreenPosition(tgtNode)
@@ -660,7 +725,7 @@ class AutoClickService : AccessibilityService() {
                     var eX = node.swipeEndX.toFloat()
                     var eY = node.swipeEndY.toFloat()
                     if (node.swipeTargetNodeId != null) {
-                        val tgtNode = nodes.find { it.id == node.swipeTargetNodeId }
+                        val tgtNode = (contextNodes ?: nodes).find { it.id == node.swipeTargetNodeId }
                         if (tgtNode != null) {
                             try {
                                 uiManager.updateNodeScreenPosition(tgtNode)
@@ -834,7 +899,7 @@ class AutoClickService : AccessibilityService() {
         }
     }
 
-    private fun checkConditionForNode(node: TargetNode, callback: (Boolean) -> Unit) {
+    private fun checkConditionForNode(node: TargetNode, contextNodes: List<TargetNode>? = null, callback: (Boolean) -> Unit) {
         if (!nodeHasCondition(node)) {
             callback(true)
             return
@@ -848,7 +913,7 @@ class AutoClickService : AccessibilityService() {
 
             checkNodeConditionAsync(node, bitmap) { isMainMatch ->
                 if (node.linkedConditionNodeId != null) {
-                    val linkedNode = nodes.find { it.id == node.linkedConditionNodeId }
+                    val linkedNode = (contextNodes ?: nodes).find { it.id == node.linkedConditionNodeId }
                     if (linkedNode != null) {
                         checkNodeConditionAsync(linkedNode, bitmap) { isLinkedMatch ->
                             val isColorMatch = if (node.linkedConditionOperator == "OR") {
@@ -958,16 +1023,23 @@ class AutoClickService : AccessibilityService() {
                     if (node.isSmartOcr) {
                         val parsedVal = parseNumericValue(recognizedText, node.ocrCustomSuffixes)
                         if (parsedVal != null) {
+                            node.lastRecognizedValue = parsedVal
+                            val compareValue = if (node.ocrCompareToNodeId != null) {
+                                val otherNode = (contextNodes ?: nodes).find { it.id == node.ocrCompareToNodeId }
+                                otherNode?.lastRecognizedValue ?: node.ocrTargetValue
+                            } else {
+                                node.ocrTargetValue
+                            }
                             isMatch = when (node.ocrOperator) {
-                                ">" -> parsedVal > node.ocrTargetValue
-                                "<" -> parsedVal < node.ocrTargetValue
-                                ">=" -> parsedVal >= node.ocrTargetValue
-                                "<=" -> parsedVal <= node.ocrTargetValue
-                                "==" -> parsedVal == node.ocrTargetValue
-                                "!=" -> parsedVal != node.ocrTargetValue
+                                ">" -> parsedVal > compareValue
+                                "<" -> parsedVal < compareValue
+                                ">=" -> parsedVal >= compareValue
+                                "<=" -> parsedVal <= compareValue
+                                "==" -> parsedVal == compareValue
+                                "!=" -> parsedVal != compareValue
                                 else -> false
                             }
-                            debugMsg = "Шаг ${node.id}: [Смарт OCR] Текст='$recognizedText', Число=$parsedVal. Условие: $parsedVal ${node.ocrOperator} ${node.ocrTargetValue} -> $isMatch"
+                            debugMsg = "Шаг ${node.id}: [Смарт OCR] Текст='$recognizedText', Число=$parsedVal. Условие: $parsedVal ${node.ocrOperator} $compareValue -> $isMatch"
                         } else {
                             debugMsg = "Шаг ${node.id}: [Смарт OCR] Текст='$recognizedText'. Не удалось распознать число."
                         }
@@ -1060,16 +1132,23 @@ class AutoClickService : AccessibilityService() {
                     if (node.isSmartOcr) {
                         val parsedVal = parseNumericValue(recognizedText, node.ocrCustomSuffixes)
                         if (parsedVal != null) {
+                            node.lastRecognizedValue = parsedVal
+                            val compareValue = if (node.ocrCompareToNodeId != null) {
+                                val otherNode = (contextNodes ?: nodes).find { it.id == node.ocrCompareToNodeId }
+                                otherNode?.lastRecognizedValue ?: node.ocrTargetValue
+                            } else {
+                                node.ocrTargetValue
+                            }
                             isMatch = when (node.ocrOperator) {
-                                ">" -> parsedVal > node.ocrTargetValue
-                                "<" -> parsedVal < node.ocrTargetValue
-                                ">=" -> parsedVal >= node.ocrTargetValue
-                                "<=" -> parsedVal <= node.ocrTargetValue
-                                "==" -> parsedVal == node.ocrTargetValue
-                                "!=" -> parsedVal != node.ocrTargetValue
+                                ">" -> parsedVal > compareValue
+                                "<" -> parsedVal < compareValue
+                                ">=" -> parsedVal >= compareValue
+                                "<=" -> parsedVal <= compareValue
+                                "==" -> parsedVal == compareValue
+                                "!=" -> parsedVal != compareValue
                                 else -> false
                             }
-                            debugMsg = "Шаг ${node.id}: [Смарт OCR] Текст='$recognizedText', Число=$parsedVal. Условие: $parsedVal ${node.ocrOperator} ${node.ocrTargetValue} -> $isMatch"
+                            debugMsg = "Шаг ${node.id}: [Смарт OCR] Текст='$recognizedText', Число=$parsedVal. Условие: $parsedVal ${node.ocrOperator} $compareValue -> $isMatch"
                         } else {
                             debugMsg = "Шаг ${node.id}: [Смарт OCR] Текст='$recognizedText'. Не удалось распознать число."
                         }
@@ -1215,7 +1294,7 @@ class AutoClickService : AccessibilityService() {
             val cy = node.y.coerceIn(0, bitmap.height - 1)
             
             if (node.compareToNodeId != null) {
-                val otherNode = nodes.find { it.id == node.compareToNodeId }
+                val otherNode = (contextNodes ?: nodes).find { it.id == node.compareToNodeId }
                 if (otherNode != null) {
                     val color1 = bitmap.getPixel(cx, cy)
                     val cx2 = otherNode.x.coerceIn(0, bitmap.width - 1)
@@ -1416,14 +1495,23 @@ class AutoClickService : AccessibilityService() {
                 if (isDispatchingRecordGesture) return@setOnTouchListener true
                 when (event.action) {
                     android.view.MotionEvent.ACTION_DOWN -> {
+                        if (::uiManager.isInitialized && uiManager.floatingControlBar != null) {
+                            val hudRect = android.graphics.Rect()
+                            uiManager.floatingControlBar?.getGlobalVisibleRect(hudRect)
+                            val pad = 10
+                            if (event.rawX >= hudRect.left - pad && event.rawX <= hudRect.right + pad &&
+                                event.rawY >= hudRect.top - pad && event.rawY <= hudRect.bottom + pad) {
+                                return@setOnTouchListener false
+                            }
+                        }
                         val currentTime = System.currentTimeMillis()
                         recordDownX = event.rawX
                         recordDownY = event.rawY
-                        dragX = event.rawX
-                        dragY = event.rawY
+                        dragX = event.x
+                        dragY = event.y
                         isDragging = true
                         swipePoints.clear()
-                        swipePoints.add(Pair(event.rawX, event.rawY))
+                        swipePoints.add(Pair(event.x, event.y))
                         drawingView.invalidate()
                         recordDownTime = currentTime
 
@@ -1433,17 +1521,17 @@ class AutoClickService : AccessibilityService() {
                         }
                     }
                     android.view.MotionEvent.ACTION_MOVE -> {
-                        dragX = event.rawX
-                        dragY = event.rawY
+                        dragX = event.x
+                        dragY = event.y
                         val last = swipePoints.lastOrNull()
-                        if (last == null || Math.hypot((event.rawX - last.first).toDouble(), (event.rawY - last.second).toDouble()) > 10) {
-                            swipePoints.add(Pair(event.rawX, event.rawY))
+                        if (last == null || Math.hypot((event.x - last.first).toDouble(), (event.y - last.second).toDouble()) > 10) {
+                            swipePoints.add(Pair(event.x, event.y))
                         }
                         drawingView.invalidate()
                     }
                     android.view.MotionEvent.ACTION_UP -> {
                         isDragging = false
-                        swipePoints.add(Pair(event.rawX, event.rawY))
+                        swipePoints.add(Pair(event.x, event.y))
                         drawingView.invalidate()
                         val duration = System.currentTimeMillis() - recordDownTime
                         val startX = recordDownX
@@ -1454,20 +1542,23 @@ class AutoClickService : AccessibilityService() {
                         android.os.Handler(android.os.Looper.getMainLooper()).post {
                             val dx = upX - startX
                             val dy = upY - startY
-                            val isSwipe = Math.hypot(dx.toDouble(), dy.toDouble()) > 20
+                            val isSwipe = Math.hypot(dx.toDouble(), dy.toDouble()) > 10
                             
                             val path = android.graphics.Path().apply {
                                 if (isSwipe && swipePoints.size >= 2) {
-                                    moveTo(swipePoints[0].first, swipePoints[0].second)
+                                    moveTo(startX, startY)
                                     for (i in 1 until swipePoints.size) {
-                                        lineTo(swipePoints[i].first, swipePoints[i].second)
+                                        // Mapping visual local coords back to global raw coords for correct gesture execution
+                                        val pX = startX + (swipePoints[i].first - swipePoints[0].first)
+                                        val pY = startY + (swipePoints[i].second - swipePoints[0].second)
+                                        lineTo(pX, pY)
                                     }
                                 } else {
                                     moveTo(startX, startY)
                                     if (isSwipe) lineTo(upX, upY)
                                 }
                             }
-                            val gestureDur = Math.max(duration, 30L)
+                            val gestureDur = if (isSwipe) Math.max(duration, 30L) else Math.max(duration, 10L)
                             
                             val gesture = android.accessibilityservice.GestureDescription.Builder()
                                 .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, gestureDur))
@@ -1566,7 +1657,7 @@ class AutoClickService : AccessibilityService() {
         isRecording = false
         hideRecordOverlay()
         if (::uiManager.isInitialized) {
-            uiManager.setNodesTouchable(true)
+            restoreTouchabilitySafe()
             uiManager.updateMenu()
         }
     }
@@ -1591,9 +1682,43 @@ class AutoClickService : AccessibilityService() {
         handler.removeCallbacksAndMessages(null)
         nodes.clear()
         activeThreads.clear()
+        if (::uiManager.isInitialized) uiManager.removeAllPhantomNodes()
         gestureQueue.clear()
         screenshotCallbacks.clear()
         instance = null
+    }
+
+    fun getHotbarItems(): List<Pair<String, String>> {
+        val prefs = getSharedPreferences("AutoClickerPrefs", android.content.Context.MODE_PRIVATE)
+        val jsonStr = prefs.getString("HotbarItems", null)
+        val list = mutableListOf<Pair<String, String>>()
+        if (jsonStr != null) {
+            try {
+                val arr = org.json.JSONArray(jsonStr)
+                for (i in 0 until arr.length()) {
+                    val obj = arr.getJSONObject(i)
+                    list.add(Pair(obj.getString("name"), obj.optString("label", obj.getString("name"))))
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+        if (list.isEmpty()) {
+            getSavedProfiles().take(5).forEach { list.add(Pair(it, it)) }
+        }
+        return list
+    }
+
+    fun saveHotbarItems(items: List<Pair<String, String>>) {
+        val prefs = getSharedPreferences("AutoClickerPrefs", android.content.Context.MODE_PRIVATE)
+        val arr = org.json.JSONArray()
+        for (item in items) {
+            val obj = org.json.JSONObject()
+            obj.put("name", item.first)
+            obj.put("label", item.second)
+            arr.put(obj)
+        }
+        prefs.edit().putString("HotbarItems", arr.toString()).apply()
     }
 
     fun getSavedProfiles(): List<String> {

@@ -252,12 +252,111 @@ class UIManager(private val service: AutoClickService) {
     }
 
 
+    private fun showHotbarConfigDialog() {
+        val allProfiles = service.getSavedProfiles()
+        val currentHotbar = service.getHotbarItems().toMutableList()
+        
+        val dialogView = ScrollView(service).apply {
+            setPadding(dpToPx(20), dpToPx(20), dpToPx(20), dpToPx(20))
+        }
+        val layout = LinearLayout(service).apply { orientation = LinearLayout.VERTICAL }
+        dialogView.addView(layout)
+        
+        val resultList = mutableListOf<Pair<String, android.widget.EditText>>()
+        
+        for (p in allProfiles) {
+            val itemLayout = LinearLayout(service).apply { 
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(0, 0, 0, dpToPx(10))
+                gravity = android.view.Gravity.CENTER_VERTICAL
+            }
+            
+            val cb = android.widget.CheckBox(service).apply {
+                text = p
+                setTextColor(Color.WHITE)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            
+            val et = android.widget.EditText(service).apply {
+                hint = "Смайл/Имя"
+                setHintTextColor(Color.GRAY)
+                setTextColor(Color.WHITE)
+                layoutParams = LinearLayout.LayoutParams(dpToPx(100), LinearLayout.LayoutParams.WRAP_CONTENT)
+            }
+            
+            val existing = currentHotbar.find { it.first == p }
+            if (existing != null) {
+                cb.isChecked = true
+                et.setText(existing.second)
+            } else {
+                cb.isChecked = false
+                et.setText(p)
+            }
+            
+            itemLayout.addView(cb)
+            itemLayout.addView(et)
+            layout.addView(itemLayout)
+            
+            resultList.add(Pair(p, et))
+            
+            cb.setOnCheckedChangeListener { _, _ ->
+                // Do nothing, just state
+            }
+        }
+        
+        val dialog = android.app.AlertDialog.Builder(service, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Настройка Хотбара")
+            .setView(dialogView)
+            .setPositiveButton("Сохранить") { _, _ ->
+                val newItems = mutableListOf<Pair<String, String>>()
+                for (i in 0 until layout.childCount) {
+                    val row = layout.getChildAt(i) as LinearLayout
+                    val cb = row.getChildAt(0) as android.widget.CheckBox
+                    val et = row.getChildAt(1) as android.widget.EditText
+                    if (cb.isChecked) {
+                        newItems.add(Pair(cb.text.toString(), et.text.toString().takeIf { it.isNotBlank() } ?: cb.text.toString()))
+                    }
+                }
+                service.saveHotbarItems(newItems)
+                updateHotbar(hotbarContainer!!)
+            }
+            .setNegativeButton("Отмена", null)
+            .create()
+            
+        dialog.window?.setType(
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O)
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else
+                WindowManager.LayoutParams.TYPE_PHONE
+        )
+        dialog.show()
+    }
+
+    var hotbarContainer: LinearLayout? = null
+
     private fun updateHotbar(container: LinearLayout) {
+        hotbarContainer = container
         container.removeAllViews()
-        val profiles = service.getSavedProfiles()
+        val profiles = service.getHotbarItems()
+        
+        val configBtn = Button(service).apply {
+            text = "⚙️"
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.parseColor("#444444"))
+            setPadding(dpToPx(10), dpToPx(5), dpToPx(10), dpToPx(5))
+            val params = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            params.setMargins(0, 0, dpToPx(5), 0)
+            layoutParams = params
+            setOnClickListener { showHotbarConfigDialog() }
+        }
+        container.addView(configBtn)
+        
         if (profiles.isEmpty()) {
             val tv = TextView(service).apply {
-                text = "Нет профилей"
+                text = "Пусто"
                 setTextColor(Color.GRAY)
                 setPadding(dpToPx(10), 0, dpToPx(10), 0)
             }
@@ -266,7 +365,7 @@ class UIManager(private val service: AutoClickService) {
         }
         for (p in profiles) {
             val btn = Button(service).apply {
-                text = p
+                text = p.second
                 setTextColor(Color.WHITE)
                 setBackgroundColor(Color.parseColor("#222222"))
                 setPadding(dpToPx(10), dpToPx(5), dpToPx(10), dpToPx(5))
@@ -278,9 +377,13 @@ class UIManager(private val service: AutoClickService) {
                 layoutParams = params
                 
                 setOnClickListener {
-                    service.loadProfile(p)
+                    val df = java.text.SimpleDateFormat("HH-mm-ss", java.util.Locale.getDefault())
+                    val autoSaveName = "AutoSave / " + df.format(java.util.Date())
+                    service.saveProfile(autoSaveName)
+                    
+                    service.loadProfile(p.first)
                     service.uiManager.updateMenu()
-                    android.widget.Toast.makeText(service, "Загружен: $p", android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(service, "Автосохранено '$autoSaveName'. Загружен: ${p.first}", android.widget.Toast.LENGTH_LONG).show()
                 }
             }
             container.addView(btn)
@@ -534,8 +637,15 @@ class UIManager(private val service: AutoClickService) {
                     val dx = event.rawX - initialTouchX
                     val dy = event.rawY - initialTouchY
                     if (Math.abs(dx) > 10 || Math.abs(dy) > 10) isMoved = true
-                    params.x = initialX + dx.toInt()
-                    params.y = initialY + dy.toInt()
+                    val metrics = service.resources.displayMetrics
+                    var newX = initialX + dx.toInt()
+                    var newY = initialY + dy.toInt()
+                    if (newX < 0) newX = 0
+                    if (newY < 0) newY = 0
+                    if (newX > metrics.widthPixels - dpToPx(30)) newX = metrics.widthPixels - dpToPx(30)
+                    if (newY > metrics.heightPixels - dpToPx(30)) newY = metrics.heightPixels - dpToPx(30)
+                    params.x = newX
+                    params.y = newY
                     windowManager.updateViewLayout(layout, params)
                     true
                 }
@@ -563,8 +673,15 @@ class UIManager(private val service: AutoClickService) {
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    params.x = initialX + (event.rawX - initialTouchX).toInt()
-                    params.y = initialY + (event.rawY - initialTouchY).toInt()
+                    val metrics = service.resources.displayMetrics
+                    var newX = initialX + (event.rawX - initialTouchX).toInt()
+                    var newY = initialY + (event.rawY - initialTouchY).toInt()
+                    if (newX < 0) newX = 0
+                    if (newY < 0) newY = 0
+                    if (newX > metrics.widthPixels - dpToPx(30)) newX = metrics.widthPixels - dpToPx(30)
+                    if (newY > metrics.heightPixels - dpToPx(30)) newY = metrics.heightPixels - dpToPx(30)
+                    params.x = newX
+                    params.y = newY
                     windowManager.updateViewLayout(windowView, params)
                     true
                 }
@@ -955,7 +1072,36 @@ class UIManager(private val service: AutoClickService) {
         profileLayout.addView(loadBtn)
 
         layout.addView(headerRow)
-        layout.addView(startBtn)
+        
+        val recordPlayLayout = LinearLayout(service).apply { orientation = LinearLayout.HORIZONTAL }
+        if (isRec) {
+            val rpStart = Button(service).apply {
+                text = if (service.isRecording) "■ СТОП" else "🔴 ЗАПИСЬ"
+                setBackgroundColor(if (service.isRecording) Color.RED else Color.GREEN)
+                setTextColor(Color.WHITE)
+                layoutParams = LinearLayout.LayoutParams(0, WindowManager.LayoutParams.WRAP_CONTENT, 1f)
+                setOnClickListener { 
+                    service.toggleRecording()
+                    updateMenu()
+                }
+            }
+            val rpPlay = Button(service).apply {
+                text = if (service.isPlaying) "■ СТОП" else "▶ ПРОИГРАТЬ"
+                setBackgroundColor(if (service.isPlaying) Color.RED else Color.parseColor("#FF00C853"))
+                setTextColor(Color.WHITE)
+                layoutParams = LinearLayout.LayoutParams(0, WindowManager.LayoutParams.WRAP_CONTENT, 1f)
+                setOnClickListener { 
+                    service.togglePlay()
+                    updateMenu()
+                }
+            }
+            recordPlayLayout.addView(rpStart)
+            recordPlayLayout.addView(rpPlay)
+            layout.addView(recordPlayLayout)
+        } else {
+            layout.addView(startBtn)
+        }
+        
         layout.addView(addClickBtn)
         layout.addView(clearAllBtn)
         layout.addView(profileLayout)
@@ -1659,6 +1805,68 @@ class UIManager(private val service: AutoClickService) {
         return Pair(row, getValueMs)
     }
 
+    private fun swapNodes(id1: Int, id2: Int) {
+        val node1 = service.nodes.find { it.id == id1 }
+        val node2 = service.nodes.find { it.id == id2 }
+        if (node1 == null || node2 == null) return
+        
+        node1.id = id2
+        node2.id = id1
+        
+        service.nodes.forEach { n ->
+            if (n.nextNodeIdOnSuccess == id1) n.nextNodeIdOnSuccess = id2
+            else if (n.nextNodeIdOnSuccess == id2) n.nextNodeIdOnSuccess = id1
+            
+            if (n.nextNodeIdOnFail == id1) n.nextNodeIdOnFail = id2
+            else if (n.nextNodeIdOnFail == id2) n.nextNodeIdOnFail = id1
+            
+            if (n.compareToNodeId == id1) n.compareToNodeId = id2
+            else if (n.compareToNodeId == id2) n.compareToNodeId = id1
+            
+            if (n.ocrCompareToNodeId == id1) n.ocrCompareToNodeId = id2
+            else if (n.ocrCompareToNodeId == id2) n.ocrCompareToNodeId = id1
+            
+            if (n.swipeTargetNodeId == id1) n.swipeTargetNodeId = id2
+            else if (n.swipeTargetNodeId == id2) n.swipeTargetNodeId = id1
+            
+            if (n.syncWithNodeIds.isNotEmpty()) {
+                val syncIds = n.syncWithNodeIds.split(",").mapNotNull { it.trim().toIntOrNull() }.toMutableList()
+                for (i in 0 until syncIds.size) {
+                    if (syncIds[i] == id1) syncIds[i] = id2
+                    else if (syncIds[i] == id2) syncIds[i] = id1
+                }
+                n.syncWithNodeIds = syncIds.joinToString(",")
+            }
+        }
+        
+        service.nodes.sortBy { it.id }
+        
+        try { nodeViews.values.forEach { windowManager.removeView(it) } } catch(e: Exception){}
+        nodeViews.clear()
+        nodeParams.clear()
+        
+        try { swipeEndViews.values.forEach { windowManager.removeView(it) } } catch(e: Exception){}
+        swipeEndViews.clear()
+        swipeEndParams.clear()
+        
+        try { textZoneStartViews.values.forEach { windowManager.removeView(it) } } catch(e: Exception){}
+        textZoneStartViews.clear()
+        textZoneStartParams.clear()
+        
+        try { textZoneEndViews.values.forEach { windowManager.removeView(it) } } catch(e: Exception){}
+        textZoneEndViews.clear()
+        textZoneEndParams.clear()
+        
+        try { colorCompareViews.values.forEach { windowManager.removeView(it) } } catch(e: Exception){}
+        colorCompareViews.clear()
+        colorCompareParams.clear()
+        
+        createViewsForNodes(service.nodes)
+        updateMenu()
+        invalidateLines()
+        service.autoSave()
+    }
+
     private fun showEditNodeMenu(node: TargetNode) {
         setMenuFocusable(true)
         menuContentContainer.removeAllViews()
@@ -1673,13 +1881,47 @@ class UIManager(private val service: AutoClickService) {
             gravity = Gravity.START
             setPadding(0, 0, 0, 20)
         }
-        headerLayout.addView(TextView(service).apply {
-            text = "Метка [${node.id}]  "
+        val headerTitleLayout = LinearLayout(service).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        
+        val btnLeft = Button(service).apply { 
+            text = "⬅"
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.TRANSPARENT)
+            setPadding(10, 0, 10, 0)
+            layoutParams = LinearLayout.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT)
+            isEnabled = node.id > 1
+            setOnClickListener {
+                swapNodes(node.id, node.id - 1)
+            }
+        }
+        
+        val tvNodeTitle = TextView(service).apply {
+            text = " Метка [${node.id}] "
             setTextColor(Color.WHITE)
             setScaledTextSize(16f)
-        })
+            gravity = Gravity.CENTER
+        }
+        
+        val btnRight = Button(service).apply { 
+            text = "➡"
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.TRANSPARENT)
+            setPadding(10, 0, 10, 0)
+            layoutParams = LinearLayout.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT)
+            val maxId = service.nodes.maxOfOrNull { it.id } ?: 1
+            isEnabled = node.id < maxId
+            setOnClickListener {
+                swapNodes(node.id, node.id + 1)
+            }
+        }
+        
+        headerTitleLayout.addView(btnLeft)
+        headerTitleLayout.addView(tvNodeTitle)
+        headerTitleLayout.addView(btnRight)
+        
+        headerLayout.addView(headerTitleLayout)
         val typeSpinner = android.widget.Spinner(service).apply {
-            val items = arrayOf("КЛИК", "ТРИГГЕР", "МАКРОС", "МЕНЕДЖЕР")
+            val items = arrayOf("КЛИК", "ТРИГГЕР", "ВЫЗОВ СКРИПТА", "МЕНЕДЖЕР")
             val adapter = android.widget.ArrayAdapter(service, android.R.layout.simple_spinner_dropdown_item, items)
             this.adapter = adapter
             setSelection(when(node.type) {
@@ -2064,7 +2306,7 @@ class UIManager(private val service: AutoClickService) {
             antiDetectSection.visibility = View.GONE
         }
         
-        val macroSection = addSection("Настройки Макроса", node.macroProfileName != null) { body ->
+        val macroSection = addSection("Блок команд (Вызов скрипта)", node.macroProfileName != null) { body ->
             val tvMacroDesc = TextView(service).apply {
                 text = "Если условие выполнится, будет загружен и запущен выбранный профиль."
                 setTextColor(Color.LTGRAY)
@@ -2100,7 +2342,7 @@ class UIManager(private val service: AutoClickService) {
             body.addView(macroSpinner)
             
             val parallelSwitch = android.widget.Switch(service).apply {
-                text = "Выполнять параллельно (Не прерывать текущий)"
+                text = "Исполнять фоном (Не прерывать текущий сценарий)"
                 setTextColor(Color.parseColor("#FFA500"))
                 isChecked = node.macroRunParallel
                 setOnCheckedChangeListener { _, isChecked ->
@@ -2250,6 +2492,28 @@ class UIManager(private val service: AutoClickService) {
         smartOcrOpLayout.addView(smartOcrOpSpinner)
         smartOcrSettings.addView(smartOcrOpLayout)
         
+        val ocrCompareTargetLayout = LinearLayout(service).apply { orientation = LinearLayout.HORIZONTAL }
+        ocrCompareTargetLayout.addView(TextView(service).apply { text = "Сравнить с:"; setTextColor(Color.WHITE); layoutParams = LinearLayout.LayoutParams(0, WindowManager.LayoutParams.WRAP_CONTENT, 0.4f) })
+        val availableOcrNodes = service.nodes.filter { it.id != node.id && it.triggerMode == 2 }
+        val ocrCompareTargetSpinner = Spinner(service).apply {
+            val list = mutableListOf("Заданным числом")
+            availableOcrNodes.forEach { list.add("Метка ${it.id}") }
+            
+            val adp = ArrayAdapter(service, android.R.layout.simple_spinner_item, list)
+            adp.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            adapter = adp
+            
+            var selIndex = 0
+            if (node.ocrCompareToNodeId != null) {
+                val idx = availableOcrNodes.indexOfFirst { it.id == node.ocrCompareToNodeId }
+                if (idx != -1) selIndex = idx + 1
+            }
+            setSelection(selIndex)
+            layoutParams = LinearLayout.LayoutParams(0, WindowManager.LayoutParams.WRAP_CONTENT, 0.6f)
+        }
+        ocrCompareTargetLayout.addView(ocrCompareTargetSpinner)
+        smartOcrSettings.addView(ocrCompareTargetLayout)
+
         val smartOcrValLayout = LinearLayout(service).apply { orientation = LinearLayout.HORIZONTAL }
         smartOcrValLayout.addView(TextView(service).apply { text = "Значение:"; setTextColor(Color.WHITE); layoutParams = LinearLayout.LayoutParams(0, WindowManager.LayoutParams.WRAP_CONTENT, 0.4f) })
         val smartOcrValEdit = EditText(service).apply {
@@ -2260,6 +2524,13 @@ class UIManager(private val service: AutoClickService) {
         }
         smartOcrValLayout.addView(smartOcrValEdit)
         smartOcrSettings.addView(smartOcrValLayout)
+        
+        ocrCompareTargetSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                smartOcrValLayout.visibility = if (position == 0) View.VISIBLE else View.GONE
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
         
         val smartOcrSufLayout = LinearLayout(service).apply { orientation = LinearLayout.VERTICAL }
         smartOcrSufLayout.addView(TextView(service).apply { text = "Суффиксы (k:1000, m:1000000):"; setTextColor(Color.GRAY) })
@@ -2756,6 +3027,11 @@ class UIManager(private val service: AutoClickService) {
                 node.targetLanguage = if (textLangSpinner.selectedItemPosition == 1) "eng" else if (textLangSpinner.selectedItemPosition == 2) "rus+eng" else "rus"
                 node.ocrFullScreenClick = ocrFullscreenCheck.isChecked
                 node.ocrOperator = arrayOf("==", "!=", ">", "<", ">=", "<=")[smartOcrOpSpinner.selectedItemPosition]
+                if (ocrCompareTargetSpinner.selectedItemPosition > 0) {
+                    node.ocrCompareToNodeId = availableOcrNodes[ocrCompareTargetSpinner.selectedItemPosition - 1].id
+                } else {
+                    node.ocrCompareToNodeId = null
+                }
                 node.ocrTargetValue = smartOcrValEdit.text.toString().toDoubleOrNull() ?: 0.0
                 node.ocrCustomSuffixes = smartOcrSufEdit.text.toString()
                 node.syncWithNodeIds = syncEdit.text.toString().filter { it.isDigit() || it == ',' }
@@ -2928,8 +3204,15 @@ class UIManager(private val service: AutoClickService) {
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    params.x = initialX + (event.rawX - initialTouchX).toInt()
-                    params.y = initialY + (event.rawY - initialTouchY).toInt()
+                    val metrics = service.resources.displayMetrics
+                    var newX = initialX + (event.rawX - initialTouchX).toInt()
+                    var newY = initialY + (event.rawY - initialTouchY).toInt()
+                    if (newX < 0) newX = 0
+                    if (newY < 0) newY = 0
+                    if (newX > metrics.widthPixels - dpToPx(30)) newX = metrics.widthPixels - dpToPx(30)
+                    if (newY > metrics.heightPixels - dpToPx(30)) newY = metrics.heightPixels - dpToPx(30)
+                    params.x = newX
+                    params.y = newY
                     windowManager.updateViewLayout(view, params)
                     if (isStart) {
                         node.textZoneStartX = params.x + dpToPx(15)
@@ -3013,8 +3296,15 @@ class UIManager(private val service: AutoClickService) {
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    params.x = initialX + (event.rawX - initialTouchX).toInt()
-                    params.y = initialY + (event.rawY - initialTouchY).toInt()
+                    val metrics = service.resources.displayMetrics
+                    var newX = initialX + (event.rawX - initialTouchX).toInt()
+                    var newY = initialY + (event.rawY - initialTouchY).toInt()
+                    if (newX < 0) newX = 0
+                    if (newY < 0) newY = 0
+                    if (newX > metrics.widthPixels - dpToPx(30)) newX = metrics.widthPixels - dpToPx(30)
+                    if (newY > metrics.heightPixels - dpToPx(30)) newY = metrics.heightPixels - dpToPx(30)
+                    params.x = newX
+                    params.y = newY
                     windowManager.updateViewLayout(view, params)
                     val newEx = params.x + dpToPx(20)
                     val newEy = params.y + dpToPx(20)
@@ -3053,8 +3343,15 @@ class UIManager(private val service: AutoClickService) {
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    params.x = initialX + (event.rawX - initialTouchX).toInt()
-                    params.y = initialY + (event.rawY - initialTouchY).toInt()
+                    val metrics = service.resources.displayMetrics
+                    var newX = initialX + (event.rawX - initialTouchX).toInt()
+                    var newY = initialY + (event.rawY - initialTouchY).toInt()
+                    if (newX < 0) newX = 0
+                    if (newY < 0) newY = 0
+                    if (newX > metrics.widthPixels - dpToPx(30)) newX = metrics.widthPixels - dpToPx(30)
+                    if (newY > metrics.heightPixels - dpToPx(30)) newY = metrics.heightPixels - dpToPx(30)
+                    params.x = newX
+                    params.y = newY
                     windowManager.updateViewLayout(view, params)
                     val newEx = params.x + dpToPx(30)
                     val newEy = params.y + dpToPx(30)
@@ -3099,8 +3396,15 @@ class UIManager(private val service: AutoClickService) {
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    params.x = initialX + (event.rawX - initialTouchX).toInt()
-                    params.y = initialY + (event.rawY - initialTouchY).toInt()
+                    val metrics = service.resources.displayMetrics
+                    var newX = initialX + (event.rawX - initialTouchX).toInt()
+                    var newY = initialY + (event.rawY - initialTouchY).toInt()
+                    if (newX < 0) newX = 0
+                    if (newY < 0) newY = 0
+                    if (newX > metrics.widthPixels - dpToPx(30)) newX = metrics.widthPixels - dpToPx(30)
+                    if (newY > metrics.heightPixels - dpToPx(30)) newY = metrics.heightPixels - dpToPx(30)
+                    params.x = newX
+                    params.y = newY
                     windowManager.updateViewLayout(view, params)
                     if (node != null) {
                         val nx = params.x + dpToPx(30)
@@ -3487,8 +3791,15 @@ class UIManager(private val service: AutoClickService) {
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    params.x = initialX + (event.rawX - initialTouchX).toInt()
-                    params.y = initialY + (event.rawY - initialTouchY).toInt()
+                    val metrics = service.resources.displayMetrics
+                    var newX = initialX + (event.rawX - initialTouchX).toInt()
+                    var newY = initialY + (event.rawY - initialTouchY).toInt()
+                    if (newX < 0) newX = 0
+                    if (newY < 0) newY = 0
+                    if (newX > metrics.widthPixels - dpToPx(30)) newX = metrics.widthPixels - dpToPx(30)
+                    if (newY > metrics.heightPixels - dpToPx(30)) newY = metrics.heightPixels - dpToPx(30)
+                    params.x = newX
+                    params.y = newY
                     windowManager.updateViewLayout(layout, params)
                     true
                 }
