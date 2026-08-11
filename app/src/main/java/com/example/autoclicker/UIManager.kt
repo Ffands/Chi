@@ -17,6 +17,9 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.HorizontalScrollView
+import android.widget.Spinner
+import android.widget.ArrayAdapter
+import android.widget.AdapterView
 import android.widget.TextView
 import android.widget.Toast
 
@@ -125,7 +128,7 @@ class UIManager(private val service: AutoClickService) {
 
     val windowManager = service.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     
-    private var floatingControlBar: View? = null
+    var floatingControlBar: View? = null
     private var linesOverlayView: View? = null
     private var modMenu: View? = null
     private var modMenuParams: WindowManager.LayoutParams? = null
@@ -397,15 +400,14 @@ class UIManager(private val service: AutoClickService) {
         
         val layout = LinearLayout(service).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#FF111111"))
-            setPadding(5, 5, 5, 5)
+            setPadding(dpToPx(5), dpToPx(5), dpToPx(5), dpToPx(5))
             
-            // Add a border
             val drawable = android.graphics.drawable.GradientDrawable()
-            drawable.setColor(Color.parseColor("#FF111111"))
-            drawable.setStroke(dpToPx(2), Color.parseColor("#FF4CAF50"))
-            drawable.cornerRadius = dpToPx(8).toFloat()
+            drawable.setColor(Color.parseColor("#E61E1E1E")) // 90% opacity dark grey
+            drawable.setStroke(dpToPx(1), Color.parseColor("#333333"))
+            drawable.cornerRadius = dpToPx(12).toFloat()
             background = drawable
+            clipToOutline = true
         }
         
         val topRow = LinearLayout(service).apply {
@@ -1921,7 +1923,7 @@ class UIManager(private val service: AutoClickService) {
         
         headerLayout.addView(headerTitleLayout)
         val typeSpinner = android.widget.Spinner(service).apply {
-            val items = arrayOf("КЛИК", "ТРИГГЕР", "ВЫЗОВ СКРИПТА", "МЕНЕДЖЕР")
+            val items = arrayOf("🎯 Действие (Клик/Свайп)", "👁 Условие (Поиск)", "⚡ Вызов скрипта", "🔀 Менеджер (Логика)")
             val adapter = android.widget.ArrayAdapter(service, android.R.layout.simple_spinner_dropdown_item, items)
             this.adapter = adapter
             setSelection(when(node.type) {
@@ -1983,34 +1985,43 @@ class UIManager(private val service: AutoClickService) {
         fun addSection(title: String, hasChanges: Boolean, buildContent: (LinearLayout) -> Unit): LinearLayout {
             val sectionLayout = LinearLayout(service).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(0, 5, 0, 5)
+                val marginParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                marginParams.setMargins(0, dpToPx(5), 0, dpToPx(5))
+                layoutParams = marginParams
+                
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(Color.parseColor("#252525"))
+                    cornerRadius = dpToPx(12).toFloat()
+                    setStroke(dpToPx(1), Color.parseColor("#333333"))
+                }
+                clipToOutline = true
             }
             
             val headerLayout = LinearLayout(service).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setBackgroundColor(Color.parseColor("#444444"))
-                setPadding(20, 20, 20, 20)
+                setPadding(dpToPx(15), dpToPx(15), dpToPx(15), dpToPx(15))
             }
             
             val titleText = TextView(service).apply {
                 text = title
-                setTextColor(Color.WHITE)
+                setTextColor(Color.parseColor("#EEEEEE"))
                 setScaledTextSize(14f)
+                setTypeface(null, android.graphics.Typeface.BOLD)
                 layoutParams = LinearLayout.LayoutParams(0, WindowManager.LayoutParams.WRAP_CONTENT, 1f)
             }
             
             val checkIcon = TextView(service).apply {
-                text = " ✔ "
+                text = " ● "
                 setTextColor(Color.parseColor("#4CAF50"))
-                setScaledTextSize(14f)
+                setScaledTextSize(12f)
                 visibility = if (hasChanges) View.VISIBLE else View.GONE
             }
             
             val icon = TextView(service).apply {
-                text = "▼"
-                setTextColor(Color.parseColor("#E0E0E0"))
-                setScaledTextSize(14f)
+                text = "﹀"
+                setTextColor(Color.parseColor("#888888"))
+                setScaledTextSize(16f)
             }
             
             headerLayout.addView(titleText)
@@ -2019,9 +2030,8 @@ class UIManager(private val service: AutoClickService) {
             
             val bodyLayout = LinearLayout(service).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(20, 20, 20, 20)
+                setPadding(dpToPx(15), 0, dpToPx(15), dpToPx(15))
                 visibility = View.GONE
-                setBackgroundColor(Color.parseColor("#2A2A2A"))
             }
             
             buildContent(bodyLayout)
@@ -2029,10 +2039,10 @@ class UIManager(private val service: AutoClickService) {
             headerLayout.setOnClickListener {
                 if (bodyLayout.visibility == View.VISIBLE) {
                     bodyLayout.visibility = View.GONE
-                    icon.text = "▼"
+                    icon.text = "﹀"
                 } else {
                     bodyLayout.visibility = View.VISIBLE
-                    icon.text = "▲"
+                    icon.text = "︿"
                 }
             }
             
@@ -2075,7 +2085,7 @@ class UIManager(private val service: AutoClickService) {
         val defNumber = if (node.type == NodeType.CLICK) Color.WHITE else Color.YELLOW
         val hasViewChanges = !node.isVisible || node.sizeScale != 1.0f || node.crosshairColor != defCrosshair || node.numberColor != defNumber
         
-        addSection("Внешний вид", hasViewChanges) { body ->
+        addSection("🎨 Внешний вид (Цвет / Размер)", hasViewChanges) { body ->
             body.addView(toggleVisBtn)
             body.addView(sizeLayout)
             body.addView(createColorRow("Цвет метки") { color ->
@@ -2129,7 +2139,7 @@ class UIManager(private val service: AutoClickService) {
         }
 
         val hasTimingChanges = node.clickDurationMs != 30L || node.delayAfterMs != 300L || node.repetitions != 1
-        val timingsSection = addSection("Тайминги", hasTimingChanges) { body ->
+        val timingsSection = addSection("⏱ Тайминги и Задержки", hasTimingChanges) { body ->
             body.addView(clickDurRow)
             body.addView(delayRow)
             body.addView(tvRepetitions)
@@ -2177,7 +2187,7 @@ class UIManager(private val service: AutoClickService) {
         // --- MANAGER SECTION ---
         var managerSection: View? = null
         if (node.type == NodeType.MANAGER) {
-            managerSection = addSection("Настройки Менеджера", true) { body ->
+            managerSection = addSection("🔀 Настройки Менеджера", true) { body ->
                 val desc = TextView(service).apply {
                     text = "Менеджер по очереди проверяет Триггеры. Если Триггер срабатывает, происходит переход к указанной Метке."
                     setTextColor(Color.LTGRAY)
@@ -2296,7 +2306,7 @@ class UIManager(private val service: AutoClickService) {
         }
         
         val hasAntiDetect = node.randomizeDelayMs > 0 || node.randomizeRadius > 0
-        val antiDetectSection = addSection("Анти-Детект", hasAntiDetect) { body ->
+        val antiDetectSection = addSection("🛡 Анти-Детект (Случайности)", hasAntiDetect) { body ->
             body.addView(randomDelayRow)
             body.addView(tvRandomRadius)
             body.addView(randomRadiusEdit)
@@ -2306,7 +2316,7 @@ class UIManager(private val service: AutoClickService) {
             antiDetectSection.visibility = View.GONE
         }
         
-        val macroSection = addSection("Блок команд (Вызов скрипта)", node.macroProfileName != null) { body ->
+        val macroSection = addSection("⚡ Настройки вызова скрипта", node.macroProfileName != null) { body ->
             val tvMacroDesc = TextView(service).apply {
                 text = "Если условие выполнится, будет загружен и запущен выбранный профиль."
                 setTextColor(Color.LTGRAY)
@@ -2813,7 +2823,7 @@ class UIManager(private val service: AutoClickService) {
         }
 
         val hasLogicChanges = node.targetColor != null || node.targetImageBase64 != null || node.targetText != null || node.colorOperator != "==" || node.colorTolerance != 15 || node.linkedConditionNodeId != null || node.compareToNodeId != null || node.dynamicColorUpdate || node.triggerMode >= 0
-        val logicSection = addSection("Настройки Триггера", hasLogicChanges) { body ->
+        val logicSection = addSection("👁 Настройки Поиска (Условие)", hasLogicChanges) { body ->
             body.addView(triggerModeLayout)
             
             if (node.triggerMode == 0) { // Color Pixel
@@ -2854,7 +2864,7 @@ class UIManager(private val service: AutoClickService) {
         }
 
         val hasRoutingChanges = node.nextNodeIdOnSuccess != null || node.nextNodeIdOnFail != null || node.maxCheckCycles != null
-        val routingSection = addSection("Маршрутизация (Ветвление)", hasRoutingChanges) { body ->
+        val routingSection = addSection("🛣 Маршрутизация (Куда идти дальше)", hasRoutingChanges) { body ->
             body.addView(successLayout)
             if (node.triggerMode != -1) {
                 body.addView(failLayout)
@@ -2970,7 +2980,7 @@ class UIManager(private val service: AutoClickService) {
 
         
         val hasSwipeChanges = node.syncWithNodeIds.isNotEmpty() || node.isSwipe || node.swipeTargetNodeId != null || node.swipeDurationMs != 500L
-        val syncSwipeSection = addSection("Настройки Действий", hasSwipeChanges) { body ->
+        val syncSwipeSection = addSection("⚙️ Доп. настройки (Свайп / Синхронизация)", hasSwipeChanges) { body ->
             body.addView(syncLayout)
             body.addView(swipeLayout)
             body.addView(swipeDurRow)

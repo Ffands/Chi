@@ -8,6 +8,9 @@ import android.graphics.Path
 import android.os.Handler
 import android.os.Looper
 import android.view.Display
+import android.widget.ArrayAdapter
+import android.widget.Spinner
+import android.widget.AdapterView
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.widget.Toast
@@ -403,7 +406,7 @@ class AutoClickService : AccessibilityService() {
         if (index >= routes.size) {
             thread.currentRepetition = 0
             val currentNodesList = thread.currentScriptNodes ?: this.nodes
-            thread.currentNodeId = managerNode.nextNodeIdOnFail ?: getNextNodeLinear(managerNode.id, currentNodesList)
+            thread.currentNodeId = managerNode.nextNodeIdOnFail ?: getNextNodeLinear(managerNode.id)
             if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId} Шаг ${managerNode.id}: Менеджер -> ${thread.currentNodeId} (По умолчанию)")
             scheduleNextExecution(thread, managerNode.delayAfterMs)
             return
@@ -545,7 +548,7 @@ class AutoClickService : AccessibilityService() {
                     if (macroNodes.isNullOrEmpty()) {
                         if (::uiManager.isInitialized) uiManager.logDebug("Ошибка: Не удалось загрузить блок команд ${node.macroProfileName}")
                         thread.currentRepetition = 0
-                        thread.currentNodeId = node.nextNodeIdOnSuccess ?: getNextNodeLinear(node.id, currentNodesList)
+                        thread.currentNodeId = node.nextNodeIdOnSuccess ?: getNextNodeLinear(node.id)
                         scheduleNextExecution(thread, node.delayAfterMs)
                         return@checkConditionForNode
                     }
@@ -562,10 +565,10 @@ class AutoClickService : AccessibilityService() {
                         executeThread(newThread)
                         
                         thread.currentRepetition = 0
-                        thread.currentNodeId = node.nextNodeIdOnSuccess ?: getNextNodeLinear(node.id, currentNodesList)
+                        thread.currentNodeId = node.nextNodeIdOnSuccess ?: getNextNodeLinear(node.id)
                         scheduleNextExecution(thread, node.delayAfterMs)
                     } else {
-                        val nextId = node.nextNodeIdOnSuccess ?: getNextNodeLinear(node.id, currentNodesList)
+                        val nextId = node.nextNodeIdOnSuccess ?: getNextNodeLinear(node.id)
                         val pId = if (::uiManager.isInitialized) uiManager.showPhantomNodes(macroNodes) else null
                         thread.callStack.push(ExecutionFrame(thread.currentScriptNodes, nextId, thread.currentRepetition, thread.phantomId))
                         thread.phantomId = pId
@@ -585,7 +588,7 @@ class AutoClickService : AccessibilityService() {
                     thread.currentNodeId = node.id
                 } else {
                     thread.currentRepetition = 0
-                    thread.currentNodeId = node.nextNodeIdOnSuccess ?: getNextNodeLinear(node.id, thread.currentScriptNodes ?: this.nodes)
+                    thread.currentNodeId = node.nextNodeIdOnSuccess ?: getNextNodeLinear(node.id)
                 }
             } else {
                 if (node.maxCheckCycles != null && node.maxCheckCycles!! > 0) {
@@ -594,7 +597,7 @@ class AutoClickService : AccessibilityService() {
                     if (thread.currentCheckCycle >= node.maxCheckCycles!!) {
                         thread.currentCheckCycle = 0
                         thread.currentRepetition = 0
-                        thread.currentNodeId = node.nextNodeIdOnFail ?: getNextNodeLinear(node.id, thread.currentScriptNodes ?: this.nodes)
+                        thread.currentNodeId = node.nextNodeIdOnFail ?: getNextNodeLinear(node.id)
                     } else {
                         thread.currentNodeId = node.id
                     }
@@ -656,7 +659,7 @@ class AutoClickService : AccessibilityService() {
         return null // all nodes skipped
     }
 
-    private fun performGestureForNodes(activeNodes: List<TargetNode>, contextNodes: List<TargetNode>? = null) {
+    private fun performGestureForNodes(activeNodes: List<TargetNode>) {
         if (enableMultitouch) {
             val builder = GestureDescription.Builder()
             for (node in activeNodes) {
@@ -674,7 +677,7 @@ class AutoClickService : AccessibilityService() {
                     var eX = node.swipeEndX.toFloat()
                     var eY = node.swipeEndY.toFloat()
                     if (node.swipeTargetNodeId != null) {
-                        val tgtNode = (contextNodes ?: nodes).find { it.id == node.swipeTargetNodeId }
+                        val tgtNode = (nodes).find { it.id == node.swipeTargetNodeId }
                         if (tgtNode != null) {
                             try {
                                 uiManager.updateNodeScreenPosition(tgtNode)
@@ -725,7 +728,7 @@ class AutoClickService : AccessibilityService() {
                     var eX = node.swipeEndX.toFloat()
                     var eY = node.swipeEndY.toFloat()
                     if (node.swipeTargetNodeId != null) {
-                        val tgtNode = (contextNodes ?: nodes).find { it.id == node.swipeTargetNodeId }
+                        val tgtNode = (nodes).find { it.id == node.swipeTargetNodeId }
                         if (tgtNode != null) {
                             try {
                                 uiManager.updateNodeScreenPosition(tgtNode)
@@ -899,7 +902,7 @@ class AutoClickService : AccessibilityService() {
         }
     }
 
-    private fun checkConditionForNode(node: TargetNode, contextNodes: List<TargetNode>? = null, callback: (Boolean) -> Unit) {
+    private fun checkConditionForNode(node: TargetNode, callback: (Boolean) -> Unit) {
         if (!nodeHasCondition(node)) {
             callback(true)
             return
@@ -913,7 +916,7 @@ class AutoClickService : AccessibilityService() {
 
             checkNodeConditionAsync(node, bitmap) { isMainMatch ->
                 if (node.linkedConditionNodeId != null) {
-                    val linkedNode = (contextNodes ?: nodes).find { it.id == node.linkedConditionNodeId }
+                    val linkedNode = (nodes).find { it.id == node.linkedConditionNodeId }
                     if (linkedNode != null) {
                         checkNodeConditionAsync(linkedNode, bitmap) { isLinkedMatch ->
                             val isColorMatch = if (node.linkedConditionOperator == "OR") {
@@ -1025,7 +1028,7 @@ class AutoClickService : AccessibilityService() {
                         if (parsedVal != null) {
                             node.lastRecognizedValue = parsedVal
                             val compareValue = if (node.ocrCompareToNodeId != null) {
-                                val otherNode = (contextNodes ?: nodes).find { it.id == node.ocrCompareToNodeId }
+                                val otherNode = (nodes).find { it.id == node.ocrCompareToNodeId }
                                 otherNode?.lastRecognizedValue ?: node.ocrTargetValue
                             } else {
                                 node.ocrTargetValue
@@ -1134,7 +1137,7 @@ class AutoClickService : AccessibilityService() {
                         if (parsedVal != null) {
                             node.lastRecognizedValue = parsedVal
                             val compareValue = if (node.ocrCompareToNodeId != null) {
-                                val otherNode = (contextNodes ?: nodes).find { it.id == node.ocrCompareToNodeId }
+                                val otherNode = (nodes).find { it.id == node.ocrCompareToNodeId }
                                 otherNode?.lastRecognizedValue ?: node.ocrTargetValue
                             } else {
                                 node.ocrTargetValue
@@ -1294,7 +1297,7 @@ class AutoClickService : AccessibilityService() {
             val cy = node.y.coerceIn(0, bitmap.height - 1)
             
             if (node.compareToNodeId != null) {
-                val otherNode = (contextNodes ?: nodes).find { it.id == node.compareToNodeId }
+                val otherNode = (nodes).find { it.id == node.compareToNodeId }
                 if (otherNode != null) {
                     val color1 = bitmap.getPixel(cx, cy)
                     val cx2 = otherNode.x.coerceIn(0, bitmap.width - 1)
