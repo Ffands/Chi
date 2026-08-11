@@ -278,7 +278,10 @@ class UIManager(private val service: AutoClickService) {
         }
     }
     fun showFloatingControlBar() {
-        if (floatingControlBar != null) return
+        if (floatingControlBar != null) {
+            floatingControlBar?.visibility = View.VISIBLE
+            return
+        }
         
         val layout = LinearLayout(service).apply {
             orientation = LinearLayout.VERTICAL
@@ -380,10 +383,7 @@ class UIManager(private val service: AutoClickService) {
             layoutParams = LinearLayout.LayoutParams(dpToPx(40), dpToPx(40))
             setPadding(0, 0, 0, 0)
             setOnClickListener {
-                try {
-                    service.disableSelf()
-                } catch(e: Exception) {}
-                removeAllViews()
+                floatingControlBar?.visibility = View.GONE
             }
         }
         
@@ -3280,8 +3280,8 @@ class UIManager(private val service: AutoClickService) {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = startX ?: (windowManager.defaultDisplay.width / 2)
-            y = startY ?: (windowManager.defaultDisplay.height / 2)
+            x = if (startX != null) startX - dpToPx(30) else (windowManager.defaultDisplay.width / 2 - dpToPx(30))
+            y = if (startY != null) startY - dpToPx(30) else (windowManager.defaultDisplay.height / 2 - dpToPx(30))
         }
         node.x = params.x + dpToPx(30)
         node.y = params.y + dpToPx(30)

@@ -283,7 +283,7 @@ class AutoClickService : AccessibilityService() {
             isPlaying = false
             lastRecordDownTime = 0L
             lastRecordedNodeId = null
-            android.widget.Toast.makeText(this, "Запись! Выполняйте действия на экране.", android.widget.Toast.LENGTH_SHORT).show()
+            android.widget.Toast.makeText(this, "Запись! Жесты воспроизводятся после отпускания пальца (ограничение Android).", android.widget.Toast.LENGTH_LONG).show()
             uiManager.setNodesTouchable(false)
             showRecordOverlay()
         } else {
