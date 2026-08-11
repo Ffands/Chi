@@ -1,5 +1,0 @@
-I have fixed the unresolved references:
-1. Recreated the `saveUISettings` function and its related UI variables (`showSettingsBtn`, etc.) which were accidentally overwritten during merging.
-2. Added the missing `ocrCustomSuffixes` property to the `TargetNode` model.
-
-The compilation errors should be completely resolved now. Please try running the build again!

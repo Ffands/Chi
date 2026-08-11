@@ -126,6 +126,12 @@ class AutoClickService : AccessibilityService() {
             if (!value) {
                 activeThreads.clear()
                 updateHighlight()
+                gestureQueue.clear()
+                try {
+                    isTakingScreenshot = false
+                    screenshotCallbacks.clear()
+                    handler.removeCallbacksAndMessages(null)
+                } catch(e: Exception) {}
             }
         }
     var maxCycles: Int? = null
@@ -479,8 +485,7 @@ class AutoClickService : AccessibilityService() {
                     if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId} Шаг ${node.id}: ${if (node.isSwipe) "Свайп" else "Клик"}")
                     performGestureForNodes(activeNodes)
                 } else if (node.triggerMode == 2 && node.ocrFullScreenClick) {
-                    if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId} Шаг ${node.id}: OCR Клик")
-                    performGestureForNodes(mutableListOf(node))
+                    if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId} Шаг ${node.id}: OCR Клик выполнен")
                 } else if (node.type == NodeType.MANAGER) {
                     if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId} Шаг ${node.id}: Менеджер...")
                     evaluateManagerRoutes(node.managerRoutes, 0, thread, node)
@@ -548,7 +553,7 @@ class AutoClickService : AccessibilityService() {
             updateHighlight()
 
             val randomDelay = if (node.randomizeDelayMs > 0) (0..node.randomizeDelayMs).random() else 0L
-            val minDelay = if (allowExtremeSpeed) 0L else 30L
+            val minDelay = if (allowExtremeSpeed) 2L else 30L
             
             val finalDelay = if (!isMatch && thread.currentNodeId == node.id) {
                 val pollDelay = if (node.triggerMode == 2) 300L else 150L
@@ -576,16 +581,6 @@ class AutoClickService : AccessibilityService() {
         var looped = false
         
         while (nextIndex < nSize) {
-            val n = nodes[nextIndex]
-            if (!n.skipSequentialExecution) {
-                return n.id
-            }
-            nextIndex++
-        }
-        
-        // Loop back
-        nextIndex = 0
-        while (nextIndex <= index && nextIndex < nSize) {
             val n = nodes[nextIndex]
             if (!n.skipSequentialExecution) {
                 return n.id
@@ -1142,7 +1137,6 @@ class AutoClickService : AccessibilityService() {
                         val origH = tgtBottom - tgtTop
                         
                         if (origW <= 0 || origH <= 0) {
-                            targetBmp.recycle()
                             return false
                         }
                         
@@ -1588,6 +1582,18 @@ class AutoClickService : AccessibilityService() {
         if (::uiManager.isInitialized) {
             uiManager.removeAllViews()
         }
+        cachedBitmap?.recycle()
+        cachedBitmap = null
+        if (mlTextAnalyzer != null) {
+            try { mlTextAnalyzer!!.stop() } catch (e: Exception) {}
+            mlTextAnalyzer = null
+        }
+        handler.removeCallbacksAndMessages(null)
+        nodes.clear()
+        activeThreads.clear()
+        gestureQueue.clear()
+        screenshotCallbacks.clear()
+        instance = null
     }
 
     fun getSavedProfiles(): List<String> {
@@ -1692,6 +1698,7 @@ class AutoClickService : AccessibilityService() {
         }
 
         if (!append) {
+            isPlaying = false
             nodes.clear()
             uiManager.nodeViews.values.forEach { uiManager.windowManager.removeView(it) }
             uiManager.nodeViews.clear()

@@ -215,6 +215,7 @@ data class TargetNode(
                 nextNodeIdOnSuccess = if (obj.has("nextNodeIdOnSuccess")) obj.getInt("nextNodeIdOnSuccess") else null,
                 nextNodeIdOnFail = if (obj.has("nextNodeIdOnFail")) obj.getInt("nextNodeIdOnFail") else null,
                 skipSequentialExecution = obj.optBoolean("skipSequentialExecution", false),
+                isIndependentThread = obj.optBoolean("isIndependentThread", false),
                 isVisible = obj.optBoolean("isVisible", true),
                 crosshairColor = obj.optInt("crosshairColor", Color.RED),
                 numberColor = obj.optInt("numberColor", Color.WHITE),

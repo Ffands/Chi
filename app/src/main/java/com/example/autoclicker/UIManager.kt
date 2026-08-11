@@ -917,6 +917,7 @@ class UIManager(private val service: AutoClickService) {
             setBackgroundColor(Color.parseColor("#FF5722"))
             setTextColor(Color.WHITE)
             setOnClickListener {
+                service.isPlaying = false
                 service.nodes.clear()
                 nodeViews.values.forEach { windowManager.removeView(it) }
                 nodeViews.clear()
@@ -2574,6 +2575,7 @@ class UIManager(private val service: AutoClickService) {
                 body.addView(textLangLayout)
                 body.addView(textTargetLayout)
                 body.addView(ocrFullscreenLayout)
+                body.addView(smartOcrLayout)
                 body.addView(fragZoneBtn)
                 body.addView(imgPreview)
                 body.addView(capImgBtn)
@@ -3118,16 +3120,7 @@ class UIManager(private val service: AutoClickService) {
                 }
                 MotionEvent.ACTION_UP -> {
                     if (node != null) {
-                        val nx = params.x + dpToPx(30)
-                        val ny = params.y + dpToPx(30)
-                        val dx = nx - node.x
-                        val dy = ny - node.y
-                        if (dx != 0 || dy != 0) {
-                            node.x = nx
-                            node.y = ny
-                            if (node.swipePathPoints.isNotEmpty()) {
-                                node.swipePathPoints = node.swipePathPoints.map { Pair(it.first + dx, it.second + dy) }
-                            }
+                        if (Math.abs(event.rawX - initialTouchX) >= 10 || Math.abs(event.rawY - initialTouchY) >= 10) {
                             service.autoSave()
                         }
                     }
@@ -3391,6 +3384,7 @@ class UIManager(private val service: AutoClickService) {
         try { textZoneEndViews.values.forEach { windowManager.removeView(it) } } catch(e: Exception){}
         try { colorCompareViews.values.forEach { windowManager.removeView(it) } } catch(e: Exception){}
         try { linesOverlayView?.let { windowManager.removeView(it) } } catch(e: Exception){}
+        hideDebugWindow()
     }
 
     fun bringControlBarToFront() {
