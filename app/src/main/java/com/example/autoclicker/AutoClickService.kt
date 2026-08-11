@@ -1429,10 +1429,11 @@ class AutoClickService : AccessibilityService() {
                                     if (isSwipe) lineTo(upX, upY)
                                 }
                             }
-                            val gestureDur = Math.max(duration, 50L)
+                            val actualDur = Math.max(duration, 50L)
+                            val fastDur = if (isSwipe) 100L else 50L
                             
                             val gesture = android.accessibilityservice.GestureDescription.Builder()
-                                .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, gestureDur))
+                                .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, fastDur))
                                 .build()
                                 
                             val wm = getSystemService(android.content.Context.WINDOW_SERVICE) as android.view.WindowManager
@@ -1447,13 +1448,13 @@ class AutoClickService : AccessibilityService() {
                                 node.isSwipe = true
                                 node.swipeEndX = upX.toInt()
                                 node.swipeEndY = upY.toInt()
-                                node.swipeDurationMs = gestureDur
+                                node.swipeDurationMs = actualDur
                                 node.swipePathPoints = swipePoints.toList()
                                 if (::uiManager.isInitialized) {
                                     uiManager.createSwipeEndMarker(node)
                                 }
                             } else {
-                                node.clickDurationMs = gestureDur
+                                node.clickDurationMs = actualDur
                             }
                             
                             lastRecordedNodeId = node.id
@@ -1464,7 +1465,7 @@ class AutoClickService : AccessibilityService() {
                                 uiManager.invalidateLines() // If we add lines drawing later
                             }
 
-                            recordOverlay?.postDelayed({
+                            recordOverlay?.post({
                                 isDispatchingRecordGesture = true
                                 dispatchGesture(gesture, object : android.accessibilityservice.AccessibilityService.GestureResultCallback() {
                                     override fun onCompleted(gestureDescription: android.accessibilityservice.GestureDescription?) {
@@ -1482,7 +1483,7 @@ class AutoClickService : AccessibilityService() {
                                         }
                                     }
                                 }, null)
-                            }, 50L)
+                            })
                         }
                     }
                 }
