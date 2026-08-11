@@ -672,7 +672,7 @@ class AutoClickService : AccessibilityService() {
                     startX += (Math.cos(angle) * r).toFloat()
                     startY += (Math.sin(angle) * r).toFloat()
                 }
-                path.moveTo(startX)
+                path.moveTo(startX, startY)
                 if (node.isSwipe) {
                     var eX = node.swipeEndX.toFloat()
                     var eY = node.swipeEndY.toFloat()
