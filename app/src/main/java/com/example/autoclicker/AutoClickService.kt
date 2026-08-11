@@ -420,7 +420,7 @@ class AutoClickService : AccessibilityService() {
             return
         }
         
-        checkConditionForNode(nodeToCheck, thread.currentScriptNodes) { isMatch ->
+        checkConditionForNode(nodeToCheck) { isMatch ->
             if (!isPlaying || !thread.isActive) return@checkConditionForNode
             if (isMatch) {
                 thread.currentRepetition = 0
@@ -505,7 +505,7 @@ class AutoClickService : AccessibilityService() {
             uiManager.updateNodeScreenPosition(node)
         }
 
-        checkConditionForNode(node, currentNodes) { isMatch ->
+        checkConditionForNode(node) { isMatch ->
             if (!isPlaying || !thread.isActive) return@checkConditionForNode
             
             val currentNodesList = thread.currentScriptNodes ?: this.nodes
@@ -533,7 +533,7 @@ class AutoClickService : AccessibilityService() {
                         }
                     }
                     if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId} Шаг ${node.id}: ${if (node.isSwipe) "Свайп" else "Клик"}")
-                    performGestureForNodes(activeNodes, thread.currentScriptNodes)
+                    performGestureForNodes(activeNodes)
                 } else if (node.triggerMode == 2 && node.ocrFullScreenClick) {
                     if (::uiManager.isInitialized) uiManager.logDebug("Поток ${thread.threadId} Шаг ${node.id}: OCR Клик выполнен")
                 } else if (node.type == NodeType.MANAGER) {
@@ -672,7 +672,7 @@ class AutoClickService : AccessibilityService() {
                     startX += (Math.cos(angle) * r).toFloat()
                     startY += (Math.sin(angle) * r).toFloat()
                 }
-                path.moveTo(startX, startY)
+                path.moveTo(startX)
                 if (node.isSwipe) {
                     var eX = node.swipeEndX.toFloat()
                     var eY = node.swipeEndY.toFloat()
