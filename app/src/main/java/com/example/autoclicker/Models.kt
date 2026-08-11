@@ -55,7 +55,7 @@ data class TargetNode(
     var numberColor: Int = Color.WHITE,
     var sizeScale: Float = 1.0f,
     var syncWithNodeIds: String = "",
-    var clickDurationMs: Long = 50L,
+    var clickDurationMs: Long = 30L,
     var isSwipe: Boolean = false,
     var swipeTargetNodeId: Int? = null,
     var swipeEndX: Int = 0,
@@ -126,7 +126,7 @@ data class TargetNode(
         if (numberColor != Color.WHITE) obj.put("numberColor", numberColor)
         if (sizeScale != 1.0f) obj.put("sizeScale", sizeScale.toDouble())
         if (syncWithNodeIds.isNotEmpty()) obj.put("syncWithNodeIds", syncWithNodeIds)
-        if (clickDurationMs != 50L) obj.put("clickDurationMs", clickDurationMs)
+        if (clickDurationMs != 30L) obj.put("clickDurationMs", clickDurationMs)
         if (isSwipe) obj.put("isSwipe", isSwipe)
         if (swipeTargetNodeId != null) obj.put("swipeTargetNodeId", swipeTargetNodeId)
         if (swipeEndX != 0) obj.put("swipeEndX", swipeEndX)
@@ -220,7 +220,7 @@ data class TargetNode(
                 numberColor = obj.optInt("numberColor", Color.WHITE),
                 sizeScale = obj.optDouble("sizeScale", 1.0).toFloat(),
                 syncWithNodeIds = obj.optString("syncWithNodeIds", ""),
-                clickDurationMs = obj.optLong("clickDurationMs", 50L),
+                clickDurationMs = obj.optLong("clickDurationMs", 30L),
                 isSwipe = obj.optBoolean("isSwipe", false),
                 swipeTargetNodeId = if (obj.has("swipeTargetNodeId")) obj.getInt("swipeTargetNodeId") else null,
                 swipeEndX = obj.optInt("swipeEndX", 0),

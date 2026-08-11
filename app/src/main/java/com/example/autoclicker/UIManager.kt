@@ -214,14 +214,23 @@ class UIManager(private val service: AutoClickService) {
     }
 
     fun setNodesTouchable(touchable: Boolean) {
-        for ((id, view) in nodeViews) {
-            val params = nodeParams[id] ?: continue
-            if (touchable) {
-                params.flags = params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
-            } else {
-                params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        val lists = listOf(
+            nodeViews to nodeParams,
+            swipeEndViews to swipeEndParams,
+            colorCompareViews to colorCompareParams,
+            textZoneStartViews to textZoneStartParams,
+            textZoneEndViews to textZoneEndParams
+        )
+        for ((viewsMap, paramsMap) in lists) {
+            for ((id, view) in viewsMap) {
+                val params = paramsMap[id] ?: continue
+                if (touchable) {
+                    params.flags = params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+                } else {
+                    params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                }
+                windowManager.updateViewLayout(view, params)
             }
-            windowManager.updateViewLayout(view, params)
         }
     }
 
@@ -361,6 +370,7 @@ class UIManager(private val service: AutoClickService) {
                     swipeEndViews[it.id]?.visibility = if (it.isVisible) View.VISIBLE else View.GONE
                     textZoneStartViews[it.id]?.visibility = if (it.isVisible) View.VISIBLE else View.GONE
                     textZoneEndViews[it.id]?.visibility = if (it.isVisible) View.VISIBLE else View.GONE
+                    colorCompareViews[it.id]?.visibility = if (it.isVisible) View.VISIBLE else View.GONE
                 }
                 invalidateLines()
             }
@@ -383,7 +393,20 @@ class UIManager(private val service: AutoClickService) {
             layoutParams = LinearLayout.LayoutParams(dpToPx(40), dpToPx(40))
             setPadding(0, 0, 0, 0)
             setOnClickListener {
-                floatingControlBar?.visibility = View.GONE
+                if (service.isPlaying) service.togglePlay()
+                if (service.isRecording) service.toggleRecording()
+                service.nodes.clear()
+                removeAllViews()
+                floatingControlBar = null
+                modMenu = null
+                nodeViews.clear()
+                swipeEndViews.clear()
+                textZoneStartViews.clear()
+                textZoneEndViews.clear()
+                colorCompareViews.clear()
+                linesOverlayView?.let { try { windowManager.removeView(it) } catch(e:Exception){} }
+                linesOverlayView = null
+                // Also update main app status if needed, but the main app is likely in background.
             }
         }
         
@@ -402,6 +425,10 @@ class UIManager(private val service: AutoClickService) {
                 } else {
                     hotbarRow.visibility = View.VISIBLE
                     updateHotbar(hotbarContainer)
+                }
+                floatingControlBar?.let {
+                    val p = it.layoutParams as? WindowManager.LayoutParams
+                    if (p != null) windowManager.updateViewLayout(it, p)
                 }
             }
         }
@@ -426,7 +453,7 @@ class UIManager(private val service: AutoClickService) {
         }
         val topScroll = android.widget.HorizontalScrollView(service).apply {
             isHorizontalScrollBarEnabled = false
-            layoutParams = LinearLayout.LayoutParams(dpToPx(180), LinearLayout.LayoutParams.WRAP_CONTENT)
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
             addView(scrollContent)
         }
 
@@ -451,6 +478,10 @@ class UIManager(private val service: AutoClickService) {
                 exitBtn.visibility = vis
                 topScroll.visibility = vis
                 if (isMinimized) hotbarRow.visibility = View.GONE
+                floatingControlBar?.let {
+                    val p = it.layoutParams as? WindowManager.LayoutParams
+                    if (p != null) windowManager.updateViewLayout(it, p)
+                }
             }
 
         }
@@ -657,7 +688,7 @@ class UIManager(private val service: AutoClickService) {
                 if (isMenuFullscreen) WindowManager.LayoutParams.MATCH_PARENT else getMenuDefaultWidth(),
                 if (isMenuFullscreen) WindowManager.LayoutParams.MATCH_PARENT else WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                 PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.TOP or Gravity.START
@@ -726,11 +757,21 @@ class UIManager(private val service: AutoClickService) {
     fun applyUIScaleChange() {
         val currentTag = menuContentContainer.getChildAt(0)?.tag as? String
         recreateFloatingControlBar()
-        // we recreate all node views too, otherwise their size stays old
+        
+        // Remove all markers
         service.nodes.forEach { 
             nodeViews[it.id]?.let { view -> windowManager.removeView(view) }
+            swipeEndViews[it.id]?.let { view -> windowManager.removeView(view) }
+            colorCompareViews[it.id]?.let { view -> windowManager.removeView(view) }
+            textZoneStartViews[it.id]?.let { view -> windowManager.removeView(view) }
+            textZoneEndViews[it.id]?.let { view -> windowManager.removeView(view) }
         }
         nodeViews.clear()
+        swipeEndViews.clear()
+        colorCompareViews.clear()
+        textZoneStartViews.clear()
+        textZoneEndViews.clear()
+        
         recreateAllNodeViews()
         recreateModMenu(currentTag)
     }
@@ -773,6 +814,9 @@ class UIManager(private val service: AutoClickService) {
             if (node.triggerMode == 0 && !node.dynamicColorUpdate && node.compareToNodeId == null && node.colorCompareX != null) {
                 createColorCompareMarker(node)
             }
+            if ((node.triggerMode == 1 || node.triggerMode == 2) && node.textZoneStartX != 0) {
+                createTextZoneMarkers(node)
+            }
         }
         updateMenu()
     }
@@ -807,6 +851,9 @@ class UIManager(private val service: AutoClickService) {
             if (node.triggerMode == 0 && !node.dynamicColorUpdate && node.compareToNodeId == null && node.colorCompareX != null) {
                 createColorCompareMarker(node)
             }
+            if ((node.triggerMode == 1 || node.triggerMode == 2) && node.textZoneStartX != 0) {
+                createTextZoneMarkers(node)
+            }
         }
         updateMenu()
     }
@@ -828,7 +875,7 @@ class UIManager(private val service: AutoClickService) {
             text = "Меню Автокликера"
             setTextColor(Color.WHITE)
             setScaledTextSize(16f)
-            layoutParams = LinearLayout.LayoutParams(dpToPx(180), LinearLayout.LayoutParams.WRAP_CONTENT)
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         }
         val helpBtn = Button(service).apply {
             text = "?"
@@ -929,7 +976,7 @@ class UIManager(private val service: AutoClickService) {
             val title = TextView(service).apply {
                 text = "[${node.id}] ${if(node.type==NodeType.CLICK) "Клик" else "Пров."}"
                 setTextColor(Color.WHITE)
-                layoutParams = LinearLayout.LayoutParams(dpToPx(180), LinearLayout.LayoutParams.WRAP_CONTENT)
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
             }
             val editBtn = Button(service).apply {
                 text = "Настр."
@@ -1114,6 +1161,9 @@ class UIManager(private val service: AutoClickService) {
                         textZoneEndViews.values.forEach { windowManager.removeView(it) }
                         textZoneEndViews.clear()
                         textZoneEndParams.clear()
+                        colorCompareViews.values.forEach { windowManager.removeView(it) }
+                        colorCompareViews.clear()
+                        colorCompareParams.clear()
                         if (first != null) {
                             service.nodes.add(first)
                             recreateAllNodeViews()
@@ -1369,7 +1419,7 @@ class UIManager(private val service: AutoClickService) {
                     text = profileName
                     setBackgroundColor(Color.parseColor("#444444"))
                     setTextColor(Color.WHITE)
-                    layoutParams = LinearLayout.LayoutParams(dpToPx(180), LinearLayout.LayoutParams.WRAP_CONTENT)
+                    layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
                     setOnClickListener {
                         nameEdit.setText(profileName)
                         if (!isSaving) {
@@ -1835,7 +1885,7 @@ class UIManager(private val service: AutoClickService) {
             }
         }
 
-        val hasTimingChanges = node.clickDurationMs != 50L || node.delayAfterMs != 300L || node.repetitions != 1
+        val hasTimingChanges = node.clickDurationMs != 30L || node.delayAfterMs != 300L || node.repetitions != 1
         val timingsSection = addSection("Тайминги", hasTimingChanges) { body ->
             body.addView(clickDurRow)
             body.addView(delayRow)
@@ -2889,6 +2939,18 @@ class UIManager(private val service: AutoClickService) {
                     invalidateLines()
                     true
                 }
+                MotionEvent.ACTION_UP -> {
+                    if (isStart) {
+                        node.textZoneStartX = params.x + dpToPx(15)
+                        node.textZoneStartY = params.y + dpToPx(15)
+                    } else {
+                        node.textZoneEndX = params.x + dpToPx(15)
+                        node.textZoneEndY = params.y + dpToPx(15)
+                    }
+                    invalidateLines()
+                    service.autoSave()
+                    true
+                }
                 else -> false
             }
         }
@@ -2965,6 +3027,7 @@ class UIManager(private val service: AutoClickService) {
                     node.colorCompareX = newEx
                     node.colorCompareY = newEy
                     invalidateLines()
+                    service.autoSave()
                     true
                 }
                 else -> false
@@ -3010,6 +3073,7 @@ class UIManager(private val service: AutoClickService) {
                         node.swipeEndY = newEy
                     }
                     invalidateLines()
+                    service.autoSave()
                     true
                 }
                 else -> false
@@ -3064,6 +3128,7 @@ class UIManager(private val service: AutoClickService) {
                             if (node.swipePathPoints.isNotEmpty()) {
                                 node.swipePathPoints = node.swipePathPoints.map { Pair(it.first + dx, it.second + dy) }
                             }
+                            service.autoSave()
                         }
                     }
                     if (Math.abs(event.rawX - initialTouchX) < 10 && Math.abs(event.rawY - initialTouchY) < 10) {
@@ -3318,13 +3383,14 @@ class UIManager(private val service: AutoClickService) {
     }
 
     fun removeAllViews() {
-        floatingControlBar?.let { windowManager.removeView(it) }
-        modMenu?.let { windowManager.removeView(it) }
-        nodeViews.values.forEach { windowManager.removeView(it) }
-        swipeEndViews.values.forEach { windowManager.removeView(it) }
-        textZoneStartViews.values.forEach { windowManager.removeView(it) }
-        textZoneEndViews.values.forEach { windowManager.removeView(it) }
-        colorCompareViews.values.forEach { windowManager.removeView(it) }
+        try { floatingControlBar?.let { windowManager.removeView(it) } } catch(e: Exception){}
+        try { modMenu?.let { windowManager.removeView(it) } } catch(e: Exception){}
+        try { nodeViews.values.forEach { windowManager.removeView(it) } } catch(e: Exception){}
+        try { swipeEndViews.values.forEach { windowManager.removeView(it) } } catch(e: Exception){}
+        try { textZoneStartViews.values.forEach { windowManager.removeView(it) } } catch(e: Exception){}
+        try { textZoneEndViews.values.forEach { windowManager.removeView(it) } } catch(e: Exception){}
+        try { colorCompareViews.values.forEach { windowManager.removeView(it) } } catch(e: Exception){}
+        try { linesOverlayView?.let { windowManager.removeView(it) } } catch(e: Exception){}
     }
 
     fun bringControlBarToFront() {
@@ -3362,7 +3428,7 @@ class UIManager(private val service: AutoClickService) {
                 text = "Дебаг Лог"
                 setTextColor(Color.WHITE)
                 setScaledTextSize(14f)
-                layoutParams = LinearLayout.LayoutParams(dpToPx(180), LinearLayout.LayoutParams.WRAP_CONTENT)
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
             })
             addView(Button(service).apply {
                 text = "X"
@@ -3393,7 +3459,7 @@ class UIManager(private val service: AutoClickService) {
             orientation = LinearLayout.HORIZONTAL
             addView(Button(service).apply {
                 text = "Очистить"
-                layoutParams = LinearLayout.LayoutParams(dpToPx(180), LinearLayout.LayoutParams.WRAP_CONTENT)
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
                 setOnClickListener {
                     debugLogs.clear()
                     debugTextView?.text = ""

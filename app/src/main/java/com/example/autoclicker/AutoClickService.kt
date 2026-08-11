@@ -548,7 +548,7 @@ class AutoClickService : AccessibilityService() {
             updateHighlight()
 
             val randomDelay = if (node.randomizeDelayMs > 0) (0..node.randomizeDelayMs).random() else 0L
-            val minDelay = if (allowExtremeSpeed) 0L else 10L
+            val minDelay = if (allowExtremeSpeed) 0L else 30L
             
             val finalDelay = if (!isMatch && thread.currentNodeId == node.id) {
                 val pollDelay = if (node.triggerMode == 2) 300L else 150L
@@ -772,11 +772,22 @@ class AutoClickService : AccessibilityService() {
         return false
     }
 
-    private fun checkConditionForNode(node: TargetNode, callback: (Boolean) -> Unit) {
-        if (!nodeHasCondition(node)) {
-            callback(true)
+    private var lastScreenshotTime = 0L
+    private var cachedBitmap: Bitmap? = null
+    private var isTakingScreenshot = false
+    private val screenshotCallbacks = mutableListOf<(Bitmap?) -> Unit>()
+
+    private fun requestScreenshot(callback: (Bitmap?) -> Unit) {
+        val now = System.currentTimeMillis()
+        if (cachedBitmap != null && now - lastScreenshotTime < 50) {
+            callback(cachedBitmap)
             return
         }
+
+        screenshotCallbacks.add(callback)
+
+        if (isTakingScreenshot) return
+        isTakingScreenshot = true
 
         try {
             takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
@@ -785,47 +796,80 @@ class AutoClickService : AccessibilityService() {
                         val buffer = screenshot.hardwareBuffer
                         val hwBitmap = Bitmap.wrapHardwareBuffer(buffer, screenshot.colorSpace)
                         if (hwBitmap != null) {
-                            val bitmap = hwBitmap.copy(Bitmap.Config.ARGB_8888, false)
-                            if (bitmap != null) {
-                                checkNodeConditionAsync(node, bitmap) { isMainMatch ->
-                                    if (node.linkedConditionNodeId != null) {
-                                        val linkedNode = nodes.find { it.id == node.linkedConditionNodeId }
-                                        if (linkedNode != null) {
-                                            checkNodeConditionAsync(linkedNode, bitmap) { isLinkedMatch ->
-                                                val isColorMatch = if (node.linkedConditionOperator == "OR") {
-                                                    isMainMatch || isLinkedMatch
-                                                } else {
-                                                    isMainMatch && isLinkedMatch
-                                                }
-                                                bitmap.recycle()
-                                                hwBitmap.recycle()
-                                                buffer.close()
-                                                callback(isColorMatch)
-                                            }
-                                            return@checkNodeConditionAsync
-                                        }
-                                    }
-                                    bitmap.recycle()
-                                    hwBitmap.recycle()
-                                    buffer.close()
-                                    callback(isMainMatch)
-                                }
+                            val newBitmap = hwBitmap.copy(Bitmap.Config.ARGB_8888, false)
+                            hwBitmap.recycle()
+                            buffer.close()
+
+                            if (newBitmap != null) {
+                                cachedBitmap?.recycle()
+                                cachedBitmap = newBitmap
+                                lastScreenshotTime = System.currentTimeMillis()
+
+                                val callbacks = screenshotCallbacks.toList()
+                                screenshotCallbacks.clear()
+                                isTakingScreenshot = false
+
+                                callbacks.forEach { it(cachedBitmap) }
                                 return
                             }
-                            hwBitmap.recycle()
                         }
                         buffer.close()
                     } catch(e: Exception) {
                         e.printStackTrace()
                     }
-                    callback(false)
+                    failAll()
                 }
+
                 override fun onFailure(errorCode: Int) {
-                    callback(false)
+                    failAll()
+                }
+
+                private fun failAll() {
+                    val callbacks = screenshotCallbacks.toList()
+                    screenshotCallbacks.clear()
+                    isTakingScreenshot = false
+                    callbacks.forEach { it(null) }
                 }
             })
         } catch(e: Exception) {
-            callback(false)
+            val callbacks = screenshotCallbacks.toList()
+            screenshotCallbacks.clear()
+            isTakingScreenshot = false
+            callbacks.forEach { it(null) }
+        }
+    }
+
+    private fun checkConditionForNode(node: TargetNode, callback: (Boolean) -> Unit) {
+        if (!nodeHasCondition(node)) {
+            callback(true)
+            return
+        }
+
+        requestScreenshot { bitmap ->
+            if (bitmap == null) {
+                callback(false)
+                return@requestScreenshot
+            }
+
+            checkNodeConditionAsync(node, bitmap) { isMainMatch ->
+                if (node.linkedConditionNodeId != null) {
+                    val linkedNode = nodes.find { it.id == node.linkedConditionNodeId }
+                    if (linkedNode != null) {
+                        checkNodeConditionAsync(linkedNode, bitmap) { isLinkedMatch ->
+                            val isColorMatch = if (node.linkedConditionOperator == "OR") {
+                                isMainMatch || isLinkedMatch
+                            } else {
+                                isMainMatch && isLinkedMatch
+                            }
+                            // Do not recycle bitmap here, it is cached globally
+                            callback(isColorMatch)
+                        }
+                        return@checkNodeConditionAsync
+                    }
+                }
+                // Do not recycle bitmap here, it is cached globally
+                callback(isMainMatch)
+            }
         }
     }
 
@@ -1429,11 +1473,10 @@ class AutoClickService : AccessibilityService() {
                                     if (isSwipe) lineTo(upX, upY)
                                 }
                             }
-                            val actualDur = Math.max(duration, 50L)
-                            val fastDur = if (isSwipe) 100L else 50L
+                            val gestureDur = Math.max(duration, 30L)
                             
                             val gesture = android.accessibilityservice.GestureDescription.Builder()
-                                .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, fastDur))
+                                .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, gestureDur))
                                 .build()
                                 
                             val wm = getSystemService(android.content.Context.WINDOW_SERVICE) as android.view.WindowManager
@@ -1448,13 +1491,13 @@ class AutoClickService : AccessibilityService() {
                                 node.isSwipe = true
                                 node.swipeEndX = upX.toInt()
                                 node.swipeEndY = upY.toInt()
-                                node.swipeDurationMs = actualDur
+                                node.swipeDurationMs = gestureDur
                                 node.swipePathPoints = swipePoints.toList()
                                 if (::uiManager.isInitialized) {
                                     uiManager.createSwipeEndMarker(node)
                                 }
                             } else {
-                                node.clickDurationMs = actualDur
+                                node.clickDurationMs = gestureDur
                             }
                             
                             lastRecordedNodeId = node.id
